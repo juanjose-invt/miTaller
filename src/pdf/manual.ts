@@ -342,8 +342,31 @@ export async function buildManual(project: Project, title: string): Promise<jsPD
   return pdf;
 }
 
-export async function downloadManual(project: Project, title: string): Promise<void> {
+type SaveFn = (r: { filename: string; data: Blob }) => Promise<{ status: string }>;
+interface Host { claude?: { use?: (name: string) => Promise<{ save: SaveFn } | null> } }
+
+/**
+ * Guarda el manual. Devuelve false si la persona cancela el guardado.
+ * En un navegador normal es una descarga directa; cuando la web se sirve dentro de un
+ * visor que bloquea las descargas (artefacto de claude.ai) se usa su capacidad `downloads`.
+ */
+export async function downloadManual(project: Project, title: string): Promise<boolean> {
   const pdf = await buildManual(project, title);
-  const slug = title.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-  pdf.save(`mitaller-${slug}.pdf`);
+  const slug = title.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  const filename = `mitaller-${slug}.pdf`;
+  const use = (window as unknown as Host).claude?.use;
+  if (typeof use === 'function') {
+    const downloads = await Promise.race([use('downloads'), new Promise<null>((r) => setTimeout(() => r(null), 4000))]).catch(() => null);
+    if (downloads) {
+      try {
+        await downloads.save({ filename, data: pdf.output('blob') });
+        return true;
+      } catch (e) {
+        if ((e as { code?: string }).code === 'declined') return false;
+        throw e;
+      }
+    }
+  }
+  pdf.save(filename);
+  return true;
 }

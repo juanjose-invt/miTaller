@@ -74,8 +74,8 @@ function ProjectView({ project, title, step, setStep, editHref }: { project: Pro
     setBusy(true);
     try {
       const { downloadManual } = await import('../pdf/manual');
-      await downloadManual(project, title);
-      setToast('Manual descargado. Búscalo en tu carpeta de descargas.');
+      const saved = await downloadManual(project, title);
+      if (saved) setToast('Manual listo. Búscalo en tu carpeta de descargas.');
     } catch (e) {
       console.error(e);
       setToast('No se ha podido generar el PDF. Vuelve a intentarlo.');
