@@ -178,22 +178,61 @@ function volutaExt(w: number, h: number, curve: 'C' | 'S', bar: number, mirror: 
 }
 
 type Lado = 'l' | 'r' | 't' | 'b';
+
+/** Ajusta la caja de la voluta para que su curva real mida tw × th. `ok` = lo ha conseguido. */
+const memoFit = new Map<string, { w: number; h: number; e: ReturnType<typeof volutaExt>; ok: boolean }>();
+function fitVoluta(tw: number, th: number, curve: 'C' | 'S', mirror: boolean) {
+  const key = `${tw.toFixed(2)}|${th.toFixed(2)}|${curve}|${mirror}`;
+  const hit = memoFit.get(key);
+  if (hit) return hit;
+  let w = tw, h = th;
+  for (let k = 0; k < 150; k++) {
+    const e = volutaExt(w, h, curve, VB, mirror);
+    const dw = tw - (e.u1 - e.u0), dh = th - (e.v1 - e.v0);
+    if (Math.abs(dw) < 0.02 && Math.abs(dh) < 0.02) break;
+    w = Math.min(tw * 3, Math.max(VB * 2 + 2, w + dw * 0.9));
+    h = Math.min(th * 3, Math.max(VB * 2 + 2, h + dh * 0.9));
+  }
+  const e = volutaExt(w, h, curve, VB, mirror);
+  const out = { w, h, e, ok: Math.abs(e.u1 - e.u0 - tw) < 0.5 && Math.abs(e.v1 - e.v0 - th) < 0.5 };
+  if (memoFit.size > 5000) memoFit.clear();
+  memoFit.set(key, out);
+  return out;
+}
+
+/** Alto mínimo para que una voluta en C llegue a tocar los dos lados de un hueco de ancho tw. */
+const memoAlto = new Map<string, number>();
+export function altoMinC(tw: number): number {
+  const key = tw.toFixed(1);
+  const hit = memoAlto.get(key);
+  if (hit) return hit;
+  let lo = tw, hi = tw * 4;
+  for (let k = 0; k < 14; k++) {
+    const mid = (lo + hi) / 2;
+    if (fitVoluta(tw, mid, 'C', false).ok) hi = mid; else lo = mid;
+  }
+  const r = Math.ceil(hi) + 1;
+  memoAlto.set(key, r);
+  return r;
+}
+
 /**
  * Coloca una voluta cuya curva real (no su caja) ocupa exactamente [x0,x1] × [y0,y1]:
- * así apoya justo en los barrotes o travesaños vecinos sin atravesarlos.
+ * así apoya justo en los barrotes o travesaños vecinos sin atravesarlos. Una C necesita
+ * cierta altura para abarcar el hueco; si no la tiene, se hace en S (que siempre lo abarca).
  * Devuelve el id y los puntos de contacto en los lados pedidos.
  */
 export function volutaEn(
   f: Forja, o: { x0: number; x1: number; y0: number; y1: number; zc: number; curve: 'C' | 'S'; mirror: boolean; lados: Lado[]; name?: string },
-): { id: string; contactos: Vec3[] } {
+): { id: string; contactos: Vec3[]; curve: 'C' | 'S' } {
   const tw = o.x1 - o.x0, th = o.y1 - o.y0;
-  let w = tw, h = th;
-  for (let k = 0; k < 120; k++) {
-    const e = volutaExt(w, h, o.curve, VB, o.mirror);
-    w = Math.max(VB * 2 + 2, w + (tw - (e.u1 - e.u0)) * 0.9);
-    h = Math.max(VB * 2 + 2, h + (th - (e.v1 - e.v0)) * 0.9);
+  let fit = fitVoluta(tw, th, o.curve, o.mirror);
+  if (!fit.ok && o.curve === 'C') {
+    o = { ...o, curve: 'S', name: o.name?.replace(' en C', ' en S') };
+    fit = fitVoluta(tw, th, 'S', o.mirror);
   }
-  const e = volutaExt(w, h, o.curve, VB, o.mirror);
+  const { w, h } = fit;
+  const e = fit.e;
   const at: Vec3 = [o.x0 - e.u0, o.y0 - e.v0, o.zc - VB / 2];
   const ew = e.u1 - e.u0, eh = e.v1 - e.v0;
   let dev = 0;
@@ -233,7 +272,7 @@ export function volutaEn(
       contactos.push([r1(at[0] + u + du), r1(at[1] + v + dv), o.zc]);
     }
   }
-  return { id, contactos };
+  return { id, contactos, curve: o.curve };
 }
 
 /** Aro de diámetro exterior `d` centrado en (cx, cy); contactos en los lados pedidos. */
@@ -290,8 +329,9 @@ export function filaVolutas(
   const mid = (o.xa + o.xb) / 2;
   for (const [g0, g1] of huecos(o.xa, o.xb, o.xs, o.d)) {
     const gc = (g0 + g1) / 2, g = g1 - g0;
-    const yA = o.anchor === 'top' ? o.yRail - o.hv : o.yRail;
-    const yB = o.anchor === 'top' ? o.yRail : o.yRail + o.hv;
+    const hv = Math.min(o.hv, o.tipo === 'C' ? altoMinC(g) + 6 : g * 1.9);
+    const yA = o.anchor === 'top' ? o.yRail - hv : o.yRail;
+    const yB = o.anchor === 'top' ? o.yRail : o.yRail + hv;
     if (Math.abs(gc - mid) < 1) {
       const cy = o.anchor === 'top' ? o.yRail - g / 2 : o.yRail + g / 2;
       const a = aroEn(f, { cx: gc, cy, d: g, zc: o.zc, lados: ['l', 'r', o.anchor === 'top' ? 't' : 'b'], name: 'Aro central' });
@@ -317,7 +357,7 @@ export function medidaFrisoAros(span: number, objetivo: number) {
 export function medidaFrisoVolutas(span: number, objetivo: number) {
   const n = Math.max(1, Math.round(span / (2 * objetivo)));
   const cw = span / (2 * n);
-  return { n, cw, alto: Math.round(cw * 2) };
+  return { n, cw, alto: altoMinC(cw) + 4 };
 }
 
 export function frisoAros(f: Forja, o: { xa: number; xb: number; y0: number; n: number; zc: number }) {
@@ -691,7 +731,7 @@ function buildPuerta(v: ParamValues) {
       ? { yRail: upperBot, anchor: 'bottom', regionH: upperH, dosFilas: volArriba }
       : { yRail: y0 + s, anchor: 'bottom', regionH: lowerH, dosFilas: false });
     for (const fl of filas) {
-      const hv = Math.min(g * 1.9, fl.regionH * (fl.dosFilas ? 0.38 : 0.62));
+      const hv = Math.min(g * 2.6, fl.regionH * (fl.dosFilas ? 0.38 : 0.62));
       if (hv < g * 0.8) continue;
       const out = filaVolutas(f, { xa, xb, xs, d, yRail: fl.yRail, anchor: fl.anchor, hv, tipo: tipoVol, zc });
       h.deco.push(...out.ids); h.decoC.push(...out.contactos); h.nVol += out.nVol; h.nAro += out.nAro;
