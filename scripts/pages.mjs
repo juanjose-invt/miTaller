@@ -7,6 +7,7 @@ import { createRequire } from 'node:module';
 import { mkdirSync } from 'node:fs';
 const { chromium } = createRequire(import.meta.url)('playwright');
 
+const W = Number(process.env.W || 1366);
 const routes = process.argv.slice(2).length ? process.argv.slice(2) : ['/', '/proyecto/mesa?plantilla=escritorio&paso=2', '/crear/mesa', '/consejos/soldadura', '/consejos/ensambles'];
 mkdirSync('shots', { recursive: true });
 const server = await createServer({ server: { port: 0, host: '127.0.0.1' }, logLevel: 'error' });
@@ -14,7 +15,7 @@ await server.listen();
 const port = server.httpServer.address().port;
 const browser = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
 const errors = [];
-for (const [tag, viewport] of [['desktop', { width: 1366, height: 860 }], ['movil', { width: 390, height: 800 }]]) {
+for (const [tag, viewport] of [['desktop', { width: W, height: 860 }], ['movil', { width: 390, height: 800 }]]) {
   const page = await browser.newPage({ viewport, deviceScaleFactor: 1 });
   page.on('pageerror', (e) => errors.push(`${tag}: ${e.message}`));
   page.on('console', (m) => m.type() === 'error' && errors.push(`${tag}: ${m.text()}`));
