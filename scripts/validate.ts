@@ -52,7 +52,8 @@ function check(g: Generator, label: string, values: ParamValues): void {
     if (part.size.some((n) => n <= 0)) errs.push(`${part.id} (${part.name}): medida ≤ 0 → ${part.size.map((n) => n.toFixed(1)).join('×')}`);
     if (!part.rot && part.pos[1] - part.size[1] / 2 < -0.5) errs.push(`${part.id} (${part.name}): por debajo del suelo`);
   }
-  const rigid = p.parts.filter((q) => !q.rot && q.material !== 'malla');
+  // las formas curvas (volutas, aros, arcos) no llenan su caja: no se comprueban solapes con ellas
+  const rigid = p.parts.filter((q) => !q.rot && q.material !== 'malla' && (q.shape === 'box' || q.shape === 'cyl'));
   for (let i = 0; i < rigid.length; i++) {
     for (let j = i + 1; j < rigid.length; j++) {
       const v = overlap(rigid[i], rigid[j]);

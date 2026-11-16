@@ -25,7 +25,12 @@ export interface Part {
   /** Letra de la lista de corte (A, B, C…). Piezas idénticas comparten letra. */
   ref: string;
   name: string;
-  shape: 'box' | 'cyl';
+  /**
+   * 'box' y 'cyl' son las formas de corte normales. Las demás son elementos de forja decorativa:
+   * 'cone' punta de lanza o pincho · 'voluta' espiral en C, en S o simple · 'aro' anillo ·
+   * 'arco' barra curvada en arco · 'bola' esfera o macolla.
+   */
+  shape: 'box' | 'cyl' | 'cone' | 'voluta' | 'aro' | 'arco' | 'bola';
   /** Caja envolvente final en mm [x, y, z]. Para 'cyl' el diámetro ocupa los dos ejes no longitudinales. */
   size: Vec3;
   /** Eje longitudinal (dirección del largo / de la veta). */
@@ -42,6 +47,16 @@ export interface Part {
   cut: Vec3;
   /** Espesor de pared, solo para tubo de acero. */
   wall?: number;
+  /** Parámetros de las formas decorativas. */
+  deco?: {
+    /** Grueso de la barra con la que está hecha la voluta, el aro o el arco (mm). */
+    bar?: number;
+    curve?: 'C' | 'S' | 'espiral';
+    /** Refleja la voluta en horizontal (la C abre hacia el otro lado). */
+    mirror?: boolean;
+    /** Nº de caras de la punta: 4 = lanza piramidal, 16 o más = cono. */
+    sides?: number;
+  };
   /** Paso de la rejilla en mm, solo para malla. */
   meshCell?: number;
   note?: string;
@@ -118,6 +133,8 @@ export interface Project {
   /** Notas de diseño: por qué estas medidas, límites de uso… */
   notes?: string[];
   sources?: SourceRef[];
+  /** Color de pintura (hex) con el que se dibuja todo el acero: «#26282b» para negro forja. Sin valor, acero visto. */
+  paint?: string;
   /** Resumen legible de las opciones elegidas. */
   spec: { label: string; value: string }[];
 }

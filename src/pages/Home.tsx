@@ -102,7 +102,7 @@ export function Home({ only }: { only?: 'plantillas' }) {
             <div className="doors">
               <Link to="/plantillas" className="door main">
                 <strong><LayoutGrid size={22} aria-hidden />Partir de una plantilla</strong>
-                <span>Mesas, estanterías, conejeras, cunas, jaulas… listas para construir.</span>
+                <span>Mesas, estanterías, conejeras, cunas, verjas, vallas… listas para construir.</span>
               </Link>
               <Link to="/crear" className="door">
                 <strong><SlidersHorizontal size={22} aria-hidden />Diseñar a medida</strong>

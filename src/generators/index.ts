@@ -4,7 +4,7 @@ import type { Generator } from '../core/types';
  * Registro de generadores. Cualquier archivo de esta carpeta que exporte un objeto
  * Generator se registra solo; ORDER fija el orden de la galería.
  */
-const ORDER = ['mesa', 'estanteria', 'banco', 'conejera', 'cuna', 'taburete-acero', 'lenero', 'mesa-acero', 'estanteria-acero', 'jaula'];
+const ORDER = ['mesa', 'estanteria', 'banco', 'conejera', 'cuna', 'taburete-acero', 'lenero', 'mesa-acero', 'estanteria-acero', 'reja', 'valla', 'puerta-verja', 'jaula'];
 
 const mods = import.meta.glob<Record<string, unknown>>('./*.ts', { eager: true });
 const found: Generator[] = [];

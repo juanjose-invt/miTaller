@@ -201,6 +201,94 @@ export class Builder {
     );
   }
 
+  // ---------- forja decorativa (soldadura) ----------
+
+  /**
+   * Punta de lanza o pincho que remata un barrote. La punta mira hacia +axis.
+   * `base` es el ancho de la base; `sides` 4 = lanza piramidal (por defecto), 16 = cono.
+   */
+  punta(o: Common & { base: number; length: number; axis?: Axis; sides?: number; stock?: string }): string {
+    const axis = o.axis ?? 'y';
+    const size: Vec3 = axis === 'y' ? [o.base, o.length, o.base] : axis === 'x' ? [o.length, o.base, o.base] : [o.base, o.base, o.length];
+    return this.push(
+      {
+        ref: o.ref, name: o.name, shape: 'cone', size, axis, pos: center(o.at, size), material: 'acero',
+        stock: o.stock ?? `Punta de lanza de forja, base ${fmt(o.base)} mm, alto ${fmt(o.length)} mm`,
+        stockKind: 'unidad', cut: [o.length, o.base, o.base], deco: { sides: o.sides ?? 4 }, note: o.note,
+      },
+      o.id,
+    );
+  }
+
+  /**
+   * Voluta de forja (espiral plana) en C, en S o simple. `face` = [ancho, alto] de la caja que
+   * ocupa, con el mismo criterio que PanelOpts; `bar` = grueso de la barra. En una C las dos
+   * espirales se enrollan hacia el lado de menor coordenada (usa `mirror` para invertirla).
+   */
+  voluta(o: Common & { face: [number, number]; normal: Axis; bar: number; curve?: 'C' | 'S' | 'espiral'; mirror?: boolean; stock?: string }): string {
+    const [u, v] = o.face;
+    const t = o.bar;
+    const curve = o.curve ?? 'C';
+    const size: Vec3 = o.normal === 'y' ? [u, t, v] : o.normal === 'x' ? [t, u, v] : [u, v, t];
+    return this.push(
+      {
+        ref: o.ref, name: o.name, shape: 'voluta', size, axis: o.normal === 'x' ? 'y' : o.normal === 'y' ? 'x' : 'y', pos: center(o.at, size), material: 'acero',
+        stock: o.stock ?? `Voluta de forja en ${curve === 'espiral' ? 'espiral' : curve}, ${fmt(Math.max(u, v))} × ${fmt(Math.min(u, v))} mm, barra de ${fmt(t)} mm`,
+        stockKind: 'unidad', cut: [Math.max(u, v), Math.min(u, v), t], deco: { bar: t, curve, mirror: o.mirror }, note: o.note,
+      },
+      o.id,
+    );
+  }
+
+  /** Aro (anillo) de barra, plano, perpendicular a `normal`. */
+  aro(o: Common & { diameter: number; bar: number; normal: Axis; stock?: string }): string {
+    const d = o.diameter, t = o.bar;
+    const size: Vec3 = o.normal === 'y' ? [d, t, d] : o.normal === 'x' ? [t, d, d] : [d, d, t];
+    return this.push(
+      {
+        ref: o.ref, name: o.name, shape: 'aro', size, axis: o.normal === 'x' ? 'y' : 'x', pos: center(o.at, size), material: 'acero',
+        stock: o.stock ?? `Aro de forja Ø${fmt(d)} mm, barra de ${fmt(t)} mm`,
+        stockKind: 'unidad', cut: [d, d, t], deco: { bar: t }, note: o.note,
+      },
+      o.id,
+    );
+  }
+
+  /**
+   * Barra curvada en arco (remate superior de puertas y verjas). Vertical, en el plano
+   * perpendicular a `normal` ('z' → el arco se abre a lo ancho, en X). Los extremos apoyan en
+   * y = at[1] y la clave sube `rise`. `section` = [canto visto de frente, fondo].
+   * Usa `alturaArco()` para calcular hasta dónde llega cada barrote bajo el arco.
+   */
+  arco(o: Common & { width: number; rise: number; section: [number, number]; normal?: 'x' | 'z'; stock?: string }): string {
+    const normal = o.normal ?? 'z';
+    const [a, bb] = o.section;
+    const size: Vec3 = normal === 'z' ? [o.width, o.rise + a, bb] : [bb, o.rise + a, o.width];
+    const [s1, s2] = [...o.section].sort((x, y) => y - x);
+    return this.push(
+      {
+        ref: o.ref, name: o.name, shape: 'arco', size, axis: normal === 'z' ? 'x' : 'z', pos: center(o.at, size), material: 'acero',
+        stock: o.stock ?? `Pletina de acero ${fmt(s1)}×${fmt(s2)} mm`,
+        stockKind: 'lineal', cut: [Math.round(longitudArco(o.width, o.rise)), s1, s2], deco: { bar: a },
+        note: o.note ?? 'Se curva en frío sobre una plantilla',
+      },
+      o.id,
+    );
+  }
+
+  /** Bola o macolla decorativa. */
+  bola(o: Common & { diameter: number; stock?: string }): string {
+    const d = o.diameter;
+    const size: Vec3 = [d, d, d];
+    return this.push(
+      {
+        ref: o.ref, name: o.name, shape: 'bola', size, axis: 'y', pos: center(o.at, size), material: 'acero',
+        stock: o.stock ?? `Bola de forja Ø${fmt(d)} mm`, stockKind: 'unidad', cut: [d, d, d], note: o.note,
+      },
+      o.id,
+    );
+  }
+
   /** Gira una pieza ya creada alrededor de su centro (radianes). Úsalo solo para riostras en diagonal. */
   rotate(id: string, rot: Vec3): void {
     const p = this.parts.find((q) => q.id === id);
@@ -238,6 +326,29 @@ export function boundsOf(parts: Part[]): { min: Vec3; max: Vec3; size: Vec3; cen
   }
   const size: Vec3 = [max[0] - min[0], max[1] - min[1], max[2] - min[2]];
   return { min, max, size, center: [min[0] + size[0] / 2, min[1] + size[1] / 2, min[2] + size[2] / 2] };
+}
+
+// ---------- Geometría de arcos ----------
+
+/** Radio del arco circular de luz `width` y flecha `rise`. */
+export const radioArco = (width: number, rise: number) => (width * width) / (8 * rise) + rise / 2;
+
+/** Longitud desarrollada del arco (para la lista de corte). */
+export function longitudArco(width: number, rise: number): number {
+  if (rise <= 0) return width;
+  const r = radioArco(width, rise);
+  return 2 * r * Math.asin(Math.min(1, width / (2 * r)));
+}
+
+/**
+ * Altura del eje del arco sobre la línea de arranque, a una distancia `x` del extremo
+ * izquierdo (0 ≤ x ≤ width). En los extremos vale 0 y en el centro vale `rise`.
+ */
+export function alturaArco(x: number, width: number, rise: number): number {
+  if (rise <= 0) return 0;
+  const r = radioArco(width, rise);
+  const dx = x - width / 2;
+  return Math.sqrt(Math.max(0, r * r - dx * dx)) - (r - rise);
 }
 
 // ---------- Ayudas para fijaciones ----------

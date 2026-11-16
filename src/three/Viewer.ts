@@ -89,6 +89,82 @@ function woodBox(size: Vec3, grain: Axis, offset: number): THREE.BoxGeometry {
   return geo;
 }
 
+/** Curva plana (u, v) de una voluta dentro de su caja w × h. */
+function volutaPoints(w: number, h: number, curve: 'C' | 'S' | 'espiral', bar: number): [number, number][] {
+  const spiral = (cx: number, cy: number, R: number, turns: number): [number, number][] => {
+    const tmax = turns * Math.PI * 2;
+    const pts: [number, number][] = [];
+    const n = Math.round(turns * 28);
+    for (let i = 0; i <= n; i++) {
+      const t = tmax * (0.12 + 0.88 * (i / n));
+      const r = R * (t / tmax);
+      const phi = tmax - t; // termina en phi = 0 (punto más a la derecha), bajando
+      pts.push([cx + r * Math.cos(phi), cy + r * Math.sin(phi)]);
+    }
+    return pts;
+  };
+  const m = bar / 2;
+  const W = w - bar, H = h - bar;
+  if (curve === 'espiral') {
+    const R = Math.min(W, H) / 2;
+    return spiral(m + W / 2, m + H / 2, R, 2.25);
+  }
+  const R = Math.min(W / 2, H / 4);
+  const top = spiral(m + W - R, m + H - R, R, 1.35); // acaba en (m + W, m + H - R)
+  const bottom: [number, number][] = curve === 'C'
+    ? top.map(([x, y]): [number, number] => [x, 2 * m + H - y]).reverse()
+    : top.map(([x, y]): [number, number] => [2 * m + W - x, 2 * m + H - y]).reverse();
+  return [...top, ...bottom];
+}
+
+function decoGeometry(part: Part): THREE.BufferGeometry {
+  const thin = part.size.indexOf(Math.min(...part.size)) as 0 | 1 | 2;
+  const bar = part.deco?.bar ?? Math.min(...part.size);
+  // ejes del plano: v es el vertical (Y) siempre que el plano lo contenga
+  const plane = ([0, 1, 2] as const).filter((k) => k !== thin);
+  const [ui, vi] = plane.includes(1) ? [plane.find((k) => k !== 1)!, 1] : [plane[0], plane[1]];
+  const to3 = (u: number, v: number): THREE.Vector3 => {
+    const p = [0, 0, 0];
+    p[ui] = u - part.size[ui] / 2;
+    p[vi] = v - part.size[vi] / 2;
+    return new THREE.Vector3(p[0], p[1], p[2]);
+  };
+  if (part.shape === 'cone') {
+    const li = AX[part.axis];
+    const d = part.size[(li + 1) % 3];
+    const sides = part.deco?.sides ?? 4;
+    const geo = new THREE.ConeGeometry(sides <= 4 ? d / Math.SQRT2 : d / 2, part.size[li], sides);
+    if (sides === 4) geo.rotateY(Math.PI / 4);
+    if (part.axis === 'x') geo.rotateZ(-Math.PI / 2);
+    if (part.axis === 'z') geo.rotateX(Math.PI / 2);
+    return geo;
+  }
+  if (part.shape === 'bola') return new THREE.SphereGeometry(part.size[0] / 2, 20, 14);
+  if (part.shape === 'aro') {
+    const d = part.size[ui];
+    const geo = new THREE.TorusGeometry((d - bar) / 2, bar / 2, 8, 36);
+    if (thin === 0) geo.rotateY(Math.PI / 2);
+    if (thin === 1) geo.rotateX(Math.PI / 2);
+    return geo;
+  }
+  let pts: THREE.Vector3[];
+  if (part.shape === 'arco') {
+    const w = part.size[ui];
+    const rise = part.size[vi] - bar;
+    const r = rise > 0 ? (w * w) / (8 * rise) + rise / 2 : 0;
+    pts = Array.from({ length: 33 }, (_, i) => {
+      const x = (w * i) / 32;
+      const y = rise > 0 ? Math.sqrt(Math.max(0, r * r - (x - w / 2) ** 2)) - (r - rise) : 0;
+      return to3(x, y + bar / 2);
+    });
+  } else {
+    const w = part.size[ui], h = part.size[vi];
+    pts = volutaPoints(w, h, part.deco?.curve ?? 'C', bar).map(([u, v]) => to3(part.deco?.mirror ? w - u : u, v));
+  }
+  const path = new THREE.CatmullRomCurve3(pts, false, 'centripetal');
+  return new THREE.TubeGeometry(path, Math.max(48, pts.length * 2), bar / 2, 8, false);
+}
+
 interface Item {
   part: Part;
   group: THREE.Group;
@@ -194,7 +270,8 @@ export class Viewer {
       const mats: THREE.MeshStandardMaterial[] = [];
       let geo: THREE.BufferGeometry;
       const jitter = 0.94 + (((idx * 37) % 11) / 10) * 0.1;
-      const color = new THREE.Color(info.color).multiplyScalar(jitter);
+      const painted = project.paint && part.material === 'acero';
+      const color = painted ? new THREE.Color(project.paint!) : new THREE.Color(info.color).multiplyScalar(jitter);
 
       if (part.material === 'malla') {
         const thin = part.size.indexOf(Math.min(...part.size)) as 0 | 1 | 2;
@@ -207,6 +284,11 @@ export class Viewer {
           color, map: meshTexture(part.size[u] / cell, part.size[v] / cell), transparent: true, alphaTest: 0.35,
           side: THREE.DoubleSide, roughness: info.roughness, metalness: info.metalness,
         });
+        mats.push(mat);
+        group.add(new THREE.Mesh(geo, mat));
+      } else if (part.shape !== 'box' && part.shape !== 'cyl') {
+        geo = decoGeometry(part);
+        const mat = new THREE.MeshStandardMaterial({ color, roughness: info.roughness, metalness: info.metalness, flatShading: part.shape === 'cone' });
         mats.push(mat);
         group.add(new THREE.Mesh(geo, mat));
       } else if (part.shape === 'cyl') {
@@ -244,7 +326,8 @@ export class Viewer {
         }
       });
 
-      const edgeGeo = new THREE.EdgesGeometry(geo, 30);
+      const curved = part.shape === 'voluta' || part.shape === 'aro' || part.shape === 'arco' || part.shape === 'bola';
+      const edgeGeo = new THREE.EdgesGeometry(geo, curved ? 50 : 30);
       const edgeMat = new THREE.LineBasicMaterial({ color: info.kind === 'madera' ? EDGE_DARK : EDGE_STEEL, transparent: true, opacity: 0.55 });
       const edges = new THREE.LineSegments(edgeGeo, edgeMat);
       group.add(edges);
