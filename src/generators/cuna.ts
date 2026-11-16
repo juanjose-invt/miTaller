@@ -35,7 +35,7 @@ const AGUJERO_LIBRE = 6.5; // taladro de paso: por debajo de la franja prohibida
 // ---- decisiones de diseño (no son norma) ----
 const HOLG = 10; // interior = colchón + 10 mm en largo y en ancho
 const H_INF = 80; // alto del travesaño inferior de cada panel
-const H_SUP = 50; // alto del travesaño superior
+const H_SUP = 60; // alto del travesaño superior
 const MONT = 45; // ancho del montante del cabecero (recibe los pernos del somier)
 const SOM_GAP = 3; // holgura somier–laterales por lado
 const LARG_T = 30, LARG_H = 60; // larguero del somier
@@ -363,19 +363,30 @@ function build(v: ParamValues) {
   const marksLatBars: Mark[] = latBars.flatMap((q) => espigas([[q.x, yBarBot, q.z], [q.x, yBarTop, q.z]], 'y'));
   const dt = diamTubillon(tR);
   // travesaños de cabecero contra poste
+  // Los pernos de los laterales cruzan el poste a lo largo (eje X) muy cerca de donde entran estas uniones (eje Z):
+  // se separan en altura. Perno superior a 18 mm del canto alto; inferiores a 16 mm de cada canto del travesaño bajo.
+  const yPernosLat = [yTop - 18, yB + 16, yB + H_INF - 16];
+  // Pernos del somier: a 15 mm de cada canto del larguero.
+  const ySomPernos = (ys: number) => [ys - LAMA_T - LARG_H + 15, ys - LAMA_T - 15];
+  const espigaSup: [number, number] = [yTop - 52, yTop - 30]; // espiga del travesaño superior (alto útil)
+  const espigaInf: [number, number] = [yB + 28, yB + 52];
   const yRailMarks = union === 'tubillon'
-    ? [yTop - H_SUP / 2 - 12, yTop - H_SUP / 2 + 12, yB + H_INF / 2 - 20, yB + H_INF / 2 + 20]
-    : [yTop - H_SUP / 2, yB + H_INF / 2];
+    ? [yTop - 40, yB + 35] // un tubillón por extremo, lejos de los pernos
+    : [(espigaSup[0] + espigaSup[1]) / 2, (espigaInf[0] + espigaInf[1]) / 2];
   const marksCabPost: Mark[] = xCab.flatMap((xc) => [P, P + W].flatMap((z) => espigas(yRailMarks.map((y): Vec3 => [xc + tR / 2, y, z]), 'z')));
   // montante contra poste (siempre tubillones a lo largo) y contra travesaños
-  const yMont = [yBarBot + barH * 0.2, yBarBot + barH * 0.5, yBarBot + barH * 0.8];
+  // tubillones montante–poste: fuera de la franja de los pernos del somier (que atraviesan el montante a 18 mm del poste)
+  const pernosSomY = [...ySomPernos(yS1), ...(dos ? ySomPernos(yS2) : [])];
+  const yMont = [0.18, 0.5, 0.82].map((f) => {
+    let y = yBarBot + barH * f;
+    for (let i = 0; i < 6 && pernosSomY.some((q) => Math.abs(q - y) < 16); i++) y += 12;
+    return y;
+  });
   const marksMontPost: Mark[] = xCab.flatMap((xc) => [P, P + W].flatMap((z) => espigas(yMont.map((y): Vec3 => [xc + tR / 2, y, z]), 'z')));
   const marksMontRail: Mark[] = xCab.flatMap((xc) => [P + MONT / 2, P + W - MONT / 2].flatMap((z) => espigas([[xc + tR / 2, yBarBot, z], [xc + tR / 2, yBarTop, z]], 'y')));
   // pernos de los laterales: desde la cara exterior del poste
-  const yPernosLat = [yTop - H_SUP / 2, yB + 20, yB + H_INF - 20];
   const marksLatPernos: Mark[] = [0, 2 * P + L].flatMap((x) => [P - tR / 2, P + W + tR / 2].flatMap((z) => tornillos(yPernosLat.map((y): Vec3 => [x, y, z]), 'x')));
   // pernos del somier: desde la cara exterior del cabecero
-  const ySomPernos = (ys: number) => [ys - LAMA_T - LARG_H + 18, ys - LAMA_T - 18];
   const zSomPernos = zLarg.map((z) => z + LARG_T / 2);
   const marksSomPernos: Mark[] = [P - tR, P + L + tR].flatMap((x) => zSomPernos.flatMap((z) => tornillos(ySomPernos(yS).map((y): Vec3 => [x, y, z]), 'x')));
   // tornillos de las lamas (fijas, no se desmontan)
@@ -395,6 +406,7 @@ function build(v: ParamValues) {
         name: 'Tubillones encolados',
         why: `Una cuna no debe llevar tornillos a la vista en el interior, y los cabeceros no se desmontan: los tubillones encolados dan una unión fija, limpia y sin herrajes. Con travesaños de ${tR} mm, un tubillón de Ø${dt} mm queda entre un tercio y la mitad del grosor, como recomienda Fine Woodworking.`,
         how: [
+          `Un tubillón por extremo de travesaño: en el superior a ${mm(yTop - yRailMarks[0])} de su canto alto y en el inferior a ${mm(yRailMarks[1] - yB)} de su canto bajo, centrado en el grueso. A esas alturas no los cruzan los pernos de los laterales ni los del somier.`,
           'Marca los centros en la testa del travesaño tomando siempre las medidas desde la cara interior, que es la de referencia.',
           `Taladra con guía y tope de profundidad a Ø${dt} mm, perfectamente a escuadra, y transfiere los centros al poste con marcadores.`,
           'Monta todo en seco. Después pon la cola dentro de los agujeros (no sobre el tubillón), cierra con sargentos y limpia el sobrante con un paño húmedo.',
@@ -405,6 +417,7 @@ function build(v: ParamValues) {
         why: `La espiga de ${ESPIGA_L} mm del travesaño entra en una caja del poste: mucha superficie de cola a hilo y gran resistencia al descuadre sin ningún herraje. Es la unión tradicional de cunas y sillas.`,
         how: [
           `Marca la caja con gramil centrada en el grueso del travesaño: ancho de espiga de un tercio del grueso (unos ${mm(Math.round(tR / 3))}).`,
+          `Deja la espiga con hombro arriba y abajo: en el travesaño superior, de ${mm(espigaSup[0] - (yTop - H_SUP))} a ${mm(espigaSup[1] - (yTop - H_SUP))} desde su canto bajo; en el inferior, de ${mm(espigaInf[0] - yB)} a ${mm(espigaInf[1] - yB)}. Así no la cruzan los pernos de los laterales, que atraviesan el poste por encima y por debajo.`,
           'Vacía la caja con taladro y formón, dejando algo de fondo extra para la cola.',
           'Corta las mejillas y los hombros de la espiga a partir de la caja real y ajústala hasta que entre a mano con presión firme.',
           'Monta en seco, comprueba la escuadra y encola.',
@@ -413,7 +426,7 @@ function build(v: ParamValues) {
 
   const tecDesm = {
     name: desm === 'inserto' ? 'Unión desmontable con perno e inserto roscado' : 'Unión desmontable con perno y tuerca de barril',
-    why: 'La norma EN 716-1 (4.4.1.2) no permite tornillos autorroscantes (incluye los de madera y aglomerado) en las piezas que se desmontan para guardar o transportar la cuna: con cada montaje la rosca de la madera se gasta y la unión se afloja. Un perno métrico que rosca en metal se puede montar y desmontar sin perder agarre.',
+    why: 'La norma EN 716-1 (4.4.1.2) no permite tornillos autorroscantes (incluye los de madera y aglomerado) en las piezas que se desmontan para guardar o transportar la cuna: por eso aquí se usa perno métrico, que rosca en una pieza metálica (inserto o tuerca) y admite montajes repetidos.',
     how: desm === 'inserto'
       ? [
           'Taladra el agujero del inserto en la testa del travesaño, centrado en su grueso y a escuadra (usa la broca que indique el fabricante del inserto).',
