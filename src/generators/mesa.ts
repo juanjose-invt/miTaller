@@ -174,8 +174,15 @@ function build(v: ParamValues) {
     tubillon: [hw('Tubillón estriado de haya Ø8 × 40 mm', nUniones * 2), hw('Cola blanca para madera (PVA)', 1, 'bote')],
     espiga: [hw('Cola blanca para madera (PVA)', 1, 'bote')],
   }[union];
+  // la cola se compra una sola vez: solo aparece en el primer paso que la usa
+  let colaPuesta = false;
   const split = (lines: typeof hwUnion, part: number, total: number) =>
-    lines.map((l) => (l.unit === 'bote' ? l : { ...l, qty: Math.round((l.qty * part) / total) }));
+    lines.flatMap((l) => {
+      if (l.unit !== 'bote') return [{ ...l, qty: Math.round((l.qty * part) / total) }];
+      if (colaPuesta) return [];
+      colaPuesta = true;
+      return [l];
+    });
 
   const toolsUnion = {
     bolsillo: ['Plantilla de taladro para bolsillos con su broca escalonada', 'Atornillador con punta larga'],

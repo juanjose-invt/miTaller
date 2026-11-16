@@ -275,7 +275,8 @@ export class Viewer {
 
       if (part.material === 'malla') {
         const thin = part.size.indexOf(Math.min(...part.size)) as 0 | 1 | 2;
-        const [u, v] = [0, 1, 2].filter((k) => k !== thin);
+        // el plano se crea en XY: para un paño lateral (normal X) el ancho es el fondo (Z) y el alto es Y
+        const [u, v] = thin === 0 ? [2, 1] : [0, 1, 2].filter((k) => k !== thin);
         geo = new THREE.PlaneGeometry(part.size[u], part.size[v]);
         if (thin === 0) geo.rotateY(Math.PI / 2);
         if (thin === 1) geo.rotateX(-Math.PI / 2);

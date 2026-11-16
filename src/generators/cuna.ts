@@ -42,7 +42,7 @@ const LARG_T = 30, LARG_H = 60; // larguero del somier
 const LAMA_W = 70, LAMA_T = 15; // lama del somier
 const ENTRA_BARROTE = 12; // lo que entra cada extremo del barrote en su taladro
 const ESPIGA_L = 30; // largo de espiga en caja y espiga
-const TABLERO_T = 20, RANURA = 10; // cabecero liso: tablero en ranura
+const TABLERO_T = 20, RANURA = 10, TABLERO_RET = 3; // cabecero liso: tablero en ranura, 3 mm por detrás de la cara interior
 const RUEDA_H = 60;
 const CAJON_T = 18, FONDO_T = 6;
 
@@ -235,9 +235,9 @@ function build(v: ParamValues) {
 
   // comprobaciones duras (si algo falla, mejor no devolver la cuna)
   const insetBarrote = (tR - d) / 2;
-  const insetCab = liso ? (tR - TABLERO_T) / 2 : insetBarrote;
-  const holguraAncho = HOLG + insetBarrote; // colchón empujado contra un lateral
-  const holguraLargo = HOLG + insetCab;
+  const insetCab = liso ? TABLERO_RET : insetBarrote;
+  const holguraAncho = HOLG + 2 * insetBarrote; // colchón empujado contra un lateral: hueco en el otro
+  const holguraLargo = HOLG + 2 * insetCab;
   const huecoSomier = SOM_GAP + insetBarrote; // en posición alta, frente a los barrotes
   if (gLama > LAMA_MAX) throw new Error('cuna: separación entre lamas > 60 mm');
   if (Math.max(holguraAncho, holguraLargo) > HOLGURA_MAX) throw new Error('cuna: holgura de colchón > 30 mm');
@@ -288,7 +288,7 @@ function build(v: ParamValues) {
         cabBars.push({ x: xc + tR / 2, z: zc });
       }
     } else {
-      const id = b.panel({ ref: R('tablero'), name: 'Tablero del cabecero', material: madera, thickness: TABLERO_T, face: [barH, W - 2 * MONT], normal: 'x', at: [xc + (tR - TABLERO_T) / 2, yB + H_INF, P + MONT], grain: 'z' });
+      const id = b.panel({ ref: R('tablero'), name: 'Tablero del cabecero', material: madera, thickness: TABLERO_T, face: [barH, W - 2 * MONT], normal: 'x', at: [xc === P - tR ? P - TABLERO_RET - TABLERO_T : P + L + TABLERO_RET, yB + H_INF, P + MONT], grain: 'z' });
       const p = b.parts.find((q) => q.id === id) as Part;
       p.cut = [Math.max(W - 2 * MONT, barH) + 2 * RANURA, Math.min(W - 2 * MONT, barH) + 2 * RANURA, TABLERO_T];
       p.note = `Incluye ${RANURA} mm por cada lado que entran en la ranura. Va suelto, sin cola.`;
@@ -454,7 +454,7 @@ function build(v: ParamValues) {
 
   const pasoBarrotes = cab
     ? `Marca en los travesaños del cabecero los centros de los ${cab.n} barrotes: el primero a ${mm(cab.hueco + d / 2)} del montante y los demás cada ${mm(cab.hueco + d)}. Así cada hueco libre mide ${mm(cab.hueco)}.`
-    : `Fresa en los travesaños y montantes una ranura de ${TABLERO_T} mm de ancho y ${RANURA} mm de fondo, centrada en el grueso, para alojar el tablero.`;
+    : `Fresa en los travesaños y montantes una ranura de ${TABLERO_T} mm de ancho y ${RANURA} mm de fondo, a ${TABLERO_RET} mm de la cara interior, para alojar el tablero.`;
   b.step({
     kind: 'montar',
     title: 'Encola los paneles de los cabeceros',
@@ -649,7 +649,7 @@ function build(v: ParamValues) {
       'Aviso honesto: este diseño se ha hecho con la vista previa del borrador FprEN 716-1:2015 y con resúmenes de laboratorios y organismos; la edición vigente en España (UNE-EN 716-1:2018+AC:2019) es de pago y no se ha podido consultar entera. Si la cuna se va a regalar o vender, debe ensayarse en un laboratorio acreditado.',
       `Altura en posición baja: ${mm(fondoBajo)} desde el somier, es decir ${mm(fondoBajo - C)} desde la cara de arriba de un colchón de ${C} mm (la norma pide ≥ 500 mm; la AEP, citada por Consumer, 60 cm desde el punto más profundo).`,
       ...(dos ? [`Altura en posición alta: ${mm(fondoAlto)} desde el somier, ${mm(fondoAlto - C)} desde el colchón (la norma pide ≥ 200 mm; la AEP, 30 cm).`] : ['Somier a una sola altura, en la posición baja.']),
-      `Holgura del colchón: ${HOLG} mm en total en cada sentido (el interior mide 10 mm más que el colchón). Con el colchón empujado contra un lado quedan ${fmt1(holguraAncho)} mm hasta los barrotes; el límite es 30 mm (norma) y la AEP pide no más de 2 cm por lado.`,
+      `Holgura del colchón: ${HOLG} mm en total en cada sentido (el interior mide 10 mm más que el colchón). Con el colchón empujado contra un lado quedan ${fmt1(holguraAncho)} mm en el lado contrario hasta los barrotes${liso ? ` (${fmt1(holguraLargo)} mm a lo largo, hasta el tablero)` : ''}; el límite es 30 mm (norma) y la AEP pide no más de 2 cm por lado.`,
       `Lamas: ${nL} de ${LAMA_W} mm con ${fmt1(gLama)} mm libres (máximo 60 mm).${nL !== Math.round(Number(v.lamas)) ? ` Se ha ajustado el número pedido (${Math.round(Number(v.lamas))}) para respetar ese máximo o dejar al menos 20 mm de ventilación.` : ''}`,
       `Los pasos de los pernos se taladran a Ø${AGUJERO_LIBRE} mm para que los que queden libres al cambiar el somier de altura no caigan en la franja prohibida de 7 a 12 mm.`,
       'Sin apoyos para el pie: el único travesaño horizontal del interior es el inferior, que queda a ras del somier en la posición baja. No añadas listones, repisas ni adornos en la cara interior.',
@@ -667,7 +667,7 @@ function build(v: ParamValues) {
       { label: 'Altura sobre el colchón', value: dos ? `${fondoBajo - C} mm baja · ${fondoAlto - C} mm alta (norma: ≥ 500 / ≥ 200)` : `${fondoBajo - C} mm (norma: ≥ 500)` },
       { label: 'Somier montado en', value: posAlta ? 'Posición alta' : 'Posición baja' },
       { label: 'Lamas', value: `${nL} lamas, ${fmt1(gLama)} mm entre ellas (máx. 60)` },
-      { label: 'Holgura del colchón', value: `${fmt1(holguraAncho)} mm máx. contra un lado (máx. 30)` },
+      { label: 'Holgura del colchón', value: `${fmt1(Math.max(holguraAncho, holguraLargo))} mm máx. con el colchón empujado a un lado (máx. 30)` },
       { label: 'Cabeceros', value: liso ? 'Tablero liso en ranura' : 'De barrotes' },
       { label: 'Postes', value: `${P} × ${P} mm` },
       { label: 'Ruedas', value: ruedas ? '4, dos con freno' : 'No' },

@@ -474,8 +474,9 @@ function build(v: ParamValues): Project {
   // --- piezas ---
   const tuboP = (name: string, axis: Axis, lo: Vec3, hi: Vec3) => {
     const size: Vec3 = [hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]];
-    const length = size[AXI[axis]];
-    return b.tubo({ ref: R(`tubo:${r1(length)}`), name, section: sectionOf(axis, size), length, axis, at: lo, wall });
+    const length = r1(size[AXI[axis]]);
+    const sec = sectionOf(axis, size).map(r1) as [number, number];
+    return b.tubo({ ref: R(`tubo:${length}`), name, section: sec, length, axis, at: lo, wall });
   };
   const jFrame: Joint[] = []; // bastidores planos (paso de punteado 1)
   const jSet: Joint[] = []; // conjunto (paso de punteado 2)
@@ -491,11 +492,11 @@ function build(v: ParamValues): Project {
     tuboP('Poste', 'y', [W - s, y0, 0], [W, vt, s]),
   ];
   const frontBars = [...new Set([vb, ...(bandeja ? [trayBarY] : []), ...(oy0 > baseTop + 0.01 ? [oy0 - s] : []), ...(oy1 < maxTop - 0.01 ? [oy1] : []), maxTop])].sort((a, c) => a - c);
-  const barName = (y: number) => (y === vb ? 'Travesaño inferior' : y === maxTop ? 'Travesaño superior' : y === trayBarY && bandeja ? 'Travesaño de la ranura de la bandeja' : 'Travesaño de la puerta');
+  const barName = () => 'Travesaño largo';
   frontIds.push(postsFront[0], postsFront[1]);
   for (const y of frontBars) {
     const lo: Vec3 = [s, y, D - s], hi: Vec3 = [W - s, y + s, D];
-    frontIds.push(tuboP(barName(y), 'x', lo, hi));
+    frontIds.push(tuboP(barName(), 'x', lo, hi));
     jFrame.push(...bothEnds(lo, hi, 'x', 'z'));
   }
   const jambs: [number, number][] = [];
@@ -510,7 +511,7 @@ function build(v: ParamValues): Project {
   const backIds: string[] = [postsBack[0], postsBack[1]];
   for (const y of [vb, maxTop]) {
     const lo: Vec3 = [s, y, 0], hi: Vec3 = [W - s, y + s, s];
-    backIds.push(tuboP(barName(y), 'x', lo, hi));
+    backIds.push(tuboP(barName(), 'x', lo, hi));
     jFrame.push(...bothEnds(lo, hi, 'x', 'z'));
   }
   // Marco de la puerta principal
@@ -540,11 +541,11 @@ function build(v: ParamValues): Project {
   const setIds: string[] = [];
   const sideBarsL = [vb, ...perchBars, maxTop];
   const sideBarsR = [...new Set([vb, ...(servicio ? [sBarLow, sy1] : []), ...perchBars, maxTop])].sort((a, c) => a - c);
-  const sideName = (y: number) => (y === vb ? 'Travesaño de fondo inferior' : y === maxTop ? 'Travesaño de fondo superior' : perchBars.includes(y) ? 'Travesaño de percha' : 'Travesaño de la puerta de servicio');
+  const sideName = () => 'Travesaño de fondo';
   for (const [x0s, bars] of [[0, sideBarsL], [W - s, sideBarsR]] as const) {
     for (const y of bars) {
       const lo: Vec3 = [x0s, y, s], hi: Vec3 = [x0s + s, y + s, D - s];
-      setIds.push(tuboP(sideName(y), 'z', lo, hi));
+      setIds.push(tuboP(sideName(), 'z', lo, hi));
       jSet.push(...bothEnds(lo, hi, 'z', 'y'));
     }
   }
