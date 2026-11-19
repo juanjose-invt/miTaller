@@ -211,15 +211,15 @@ function build(v: ParamValues) {
     altoArriba = arco
       // abanico: motivos apoyados sobre el travesaño de arranque, bajo el arco (más bajos hacia los extremos)
       ? suma(filaMotivos(f, {
-          xa, xb, xs, d, tw, yRail: yS, anchor: 'bottom', hv: rise + F, zc, patron: patSup, simetria, zona: 'Paño superior (bajo el arco)',
+          xa, xb, xs, d, yRail: yS, anchor: 'bottom', hv: rise + F, zc, patron: patSup, simetria, zona: 'Paño superior (bajo el arco)',
           hvAt: (g0, g1) => Math.min(archUnder(g0).under, archUnder(g1).under) - yS - 2,
         }))
-      : suma(filaMotivos(f, { xa, xb, xs, d, tw, yRail: yTB, anchor: 'top', hv: Math.min(g * 2.6, upperH * (decoAbajo && !inter ? 0.36 : 0.45)), zc, patron: patSup, simetria, zona: 'Paño superior' }));
+      : suma(filaMotivos(f, { xa, xb, xs, d, tw, barY: [upperBot, yTB], yRail: yTB, anchor: 'top', hv: Math.min(g * 2.6, upperH * (decoAbajo && !inter ? 0.36 : 0.45)), zc, patron: patSup, simetria, zona: 'Paño superior' }));
   }
   if (decoAbajo) {
     const regH = inter ? yM - F : upperH;
     const hv = Math.min(g * 2.6, regH * (inter ? 0.7 : decoArriba && !arco ? 0.36 : 0.45));
-    altoAbajo = suma(filaMotivos(f, { xa, xb, xs, d, tw, yRail: F, anchor: 'bottom', hv, zc, patron: patInf, simetria, zona: 'Paño inferior' }));
+    altoAbajo = suma(filaMotivos(f, { xa, xb, xs, d, tw, barY: [F, inter ? yM : yTB], yRail: F, anchor: 'bottom', hv, zc, patron: patInf, simetria, zona: 'Paño inferior' }));
   }
   if (plan) {
     const out = frisoMotivos(f, plan, { xa, y0: yM + F, zc });

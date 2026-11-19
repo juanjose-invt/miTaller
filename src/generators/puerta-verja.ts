@@ -267,9 +267,12 @@ function ajustar(c: Curva, tw: number, th: number | null, mirror: boolean) {
   if (hit) return hit;
   let w = tw, h = th ?? tw;
   let e = envolvente(curvaPts(c, w, h, mirror));
+  let prev = Infinity;
   for (let k = 0; k < 150; k++) {
     const dw = tw - (e.u1 - e.u0), dh = th === null ? 0 : th - (e.v1 - e.v0);
-    if (Math.abs(dw) < 0.02 && Math.abs(dh) < 0.02) break;
+    const err = Math.abs(dw) + Math.abs(dh);
+    if (err < 0.04) break;
+    if (k % 15 === 14) { if (err > prev * 0.9) break; prev = err; } // no converge: la curva no llega
     w = Math.min(tw * 3, Math.max(VB * 2 + 2, w + dw * 0.9));
     h = th === null ? w : Math.min(th * 3, Math.max(VB * 2 + 2, h + dh * 0.9));
     e = envolvente(curvaPts(c, w, h, mirror));
@@ -280,18 +283,20 @@ function ajustar(c: Curva, tw: number, th: number | null, mirror: boolean) {
   return out;
 }
 
-/** Alto mínimo para que una voluta en C llegue a tocar los dos lados de un hueco de ancho tw. */
+/**
+ * Alto mínimo para que una voluta en C llegue a tocar los dos lados de un hueco de ancho tw.
+ * La curva es casi proporcional (solo el grueso de la barra no escala): se parte de la recta
+ * ajustada a la curva real y se comprueba con el ajuste exacto, subiendo de 1 en 1 mm si hace falta.
+ */
 const memoAlto = new Map<string, number>();
 export function altoMinC(tw: number): number {
   const key = tw.toFixed(1);
   const hit = memoAlto.get(key);
   if (hit) return hit;
-  let lo = tw * 0.8, hi = tw * 4;
-  for (let k = 0; k < 16; k++) {
-    const mid = (lo + hi) / 2;
-    if (ajustar('C', tw, mid, false).ok) hi = mid; else lo = mid;
-  }
-  const r = Math.ceil(hi) + 1;
+  let h = Math.ceil(2.225 * tw - 14.5) - 2;
+  while (h > tw && ajustar('C', tw, h, false).ok) h -= 1;
+  while (!ajustar('C', tw, h, false).ok && h < tw * 4) h += 1;
+  const r = h + 1;
   memoAlto.set(key, r);
   return r;
 }
@@ -433,29 +438,85 @@ function secuencia(patron: Motivo[], n: number, simetria: boolean, invertir = fa
   });
 }
 
+/** Alto que ocupa cada motivo en un hueco de ancho g con hv de alto libre (null: no cabe). */
+function altoMotivo(m: Motivo, g: number, hv: number): number | null {
+  const lim = (min: number, pref: number) => (hv < min ? null : Math.min(hv, pref));
+  switch (m) {
+    case 'C': { const need = altoMinC(g); return lim(need, need + 6); }
+    case 'S': return lim(g * 0.8, g * 1.9);
+    case 'espiral': { const h = altoEspiral(g); return lim(h, h); }
+    case 'aro': return lim(g, g);
+    case 'rombo': return lim(g * 1.15, g * 1.6);
+    case 'corazon': return lim(g * 0.85, g * 1.05);
+    case 'hoja': { const h = HOJA_L * Math.cos(HOJA_ANG) * g + g * 0.38; return lim(h, h); }
+    default: return null;
+  }
+}
+const HOJA_ANG = (32 * Math.PI) / 180; // inclinación de las hojas respecto a la vertical
+const HOJA_L = 0.45 / Math.sin(HOJA_ANG); // largo de la hoja por mm de hueco: llega a 0,45 del hueco
+
 /**
  * Decora los huecos entre barrotes de un paño: repite el patrón cíclicamente hueco a hueco.
  * Cada motivo se ajusta al hueco libre real y apoya en los dos barrotes y en el travesaño
  * (`anchor`: arriba, colgando del travesaño superior; abajo, sobre el inferior). Lo que no
  * cabe se sustituye (C → S) o se omite, y se avisa en `avisos`.
- * `hvAt` permite limitar la altura hueco a hueco (bajo un arco).
+ * `hvAt` permite limitar la altura hueco a hueco (bajo un arco). `barY` es el tramo vertical de
+ * los barrotes: los retorcidos tienen los extremos rectos (15 % del largo, como los dibuja el
+ * visor) y un motivo que apoya solo ahí toca la cara del cuadradillo, no sus aristas giradas.
  */
 export function filaMotivos(f: Forja, o: {
-  xa: number; xb: number; xs: number[]; d: number; tw?: boolean[]; yRail: number; anchor: 'top' | 'bottom'; hv: number; zc: number;
+  xa: number; xb: number; xs: number[]; d: number; tw?: boolean[]; barY?: [number, number]; yRail: number; anchor: 'top' | 'bottom'; hv: number; zc: number;
   patron: Motivo[]; simetria: boolean; invertir?: boolean; zona: string; hvAt?: (g0: number, g1: number) => number;
 }): Deco {
   const out = decoVacia();
   if (!patronActivo(o.patron)) return out;
-  const gaps = huecos(o.xa, o.xb, o.xs, o.d, o.tw);
-  const seq = secuencia(o.patron, gaps.length, o.simetria, o.invertir);
+  const gapsT = huecos(o.xa, o.xb, o.xs, o.d, o.tw);
+  const gapsL = huecos(o.xa, o.xb, o.xs, o.d);
+  const seq = secuencia(o.patron, gapsT.length, o.simetria, o.invertir);
   const rail: Lado = o.anchor === 'top' ? 't' : 'b';
   const omitidos = new Map<Motivo, number>();
+  const rango = (h: number, dy = 0): [number, number] => (o.anchor === 'top' ? [o.yRail - h - dy, o.yRail - dy] : [o.yRail + dy, o.yRail + h + dy]);
+  // barrotes retorcidos: tramo girado (el visor deja recto el 15 % de cada extremo) y lo que tarda la arista en salir
+  const nb = o.xs.length, kT = sobreRetorcido(o.d);
+  const tz = o.barY && o.tw?.some(Boolean) ? (() => {
+    const [A, B] = o.barY!, L = B - A;
+    const vueltas = Math.max(1, Math.round((L * 0.7) / (o.d * 9)));
+    return { z0: A + 0.15 * L, z1: B - 0.15 * L, giro: (0.7 * L) / vueltas / 8 };
+  })() : null;
+  /** Envolvente real de un motivo de barra colocado en la caja dada (coordenadas del alzado). */
+  const envMundo = (mm_: Motivo, g0: number, g1: number, y0: number, y1: number, mirror: boolean): Pt[] | null => {
+    if (mm_ === 'aro') {
+      const R = (g1 - g0) / 2, cx = (g0 + g1) / 2, cy = (y0 + y1) / 2;
+      return Array.from({ length: 144 }, (_, k) => [cx + R * Math.cos((k * Math.PI) / 72), cy + R * Math.sin((k * Math.PI) / 72)] as Pt);
+    }
+    if (mm_ === 'hoja' || mm_ === 'vacio') return null;
+    const fit = ajustar(mm_, g1 - g0, mm_ === 'espiral' ? null : y1 - y0, CON_MANO.has(mm_) && mirror);
+    if (!fit.ok) return null;
+    return fit.e.off.map(([u, v]): Pt => [g0 + u - fit.e.u0, y0 + v - fit.e.v0]);
+  };
+  /**
+   * Comprueba un motivo junto a barrotes retorcidos. Con el hueco medido a las caras (`liso`), ninguna
+   * parte que caiga en el tramo girado puede pisar las aristas; con el hueco medido a las aristas,
+   * cada lado retorcido tiene que tocar dentro del tramo girado (si no, quedaría separado de la cara).
+   */
+  const apoyaBien = (i: number, pts: Pt[], g0: number, g1: number, liso: boolean): boolean => {
+    if (!tz) return true;
+    const lados: ['l' | 'r', boolean][] = [['l', i > 0 && !!o.tw?.[i - 1]], ['r', i < nb && !!o.tw?.[i]]];
+    for (const [lado, torcido] of lados) {
+      if (!torcido) continue;
+      const borde = lado === 'l' ? g0 : g1, sg = lado === 'l' ? 1 : -1;
+      if (liso) {
+        if (pts.some(([x, y]) => y > tz.z0 - 1 && y < tz.z1 + 1 && sg * (x - borde) < kT - 0.3)) return false;
+      } else if (!pts.some(([x, y]) => y > tz.z0 + tz.giro && y < tz.z1 - tz.giro && Math.abs(x - borde) < 1)) return false;
+    }
+    return true;
+  };
   const add = (p: Pieza | null, m: Motivo, alto: number) => {
     if (!p) return false;
     out.ids.push(p.id); out.contactos.push(...p.contactos); anota(out, m); out.alto = Math.max(out.alto, alto);
     return true;
   };
-  gaps.forEach(([g0, g1], i) => {
+  gapsT.forEach((gt, i) => {
     let { m } = seq[i];
     const { mirror, centro } = seq[i];
     if (m === 'vacio') return;
@@ -463,60 +524,58 @@ export function filaMotivos(f: Forja, o: {
       out.avisos.push(`${o.zona}: el hueco central lleva un aro en lugar de ${unNombre(m)}, para que el dibujo quede simétrico.`);
       m = 'aro';
     }
-    const g = g1 - g0;
-    const hv = Math.min(o.hv, o.hvAt ? o.hvAt(g0, g1) : Infinity);
-    const y = (h: number) => (o.anchor === 'top' ? [o.yRail - h, o.yRail] : [o.yRail, o.yRail + h]);
+    /**
+     * Elige el hueco (caras o aristas del retorcido), el alto y, si hace falta, cuánto se separa
+     * del travesaño para apoyar en las aristas del retorcido; null si no cabe.
+     */
+    const medir = (mm_: Motivo): { g0: number; g1: number; h: number; dy: number } | null => {
+      const gl = gapsL[i];
+      const torcido = gl[0] !== gt[0] || gl[1] !== gt[1];
+      const prueba = ([g0, g1]: [number, number], liso: boolean, dy = 0) => {
+        const hv = Math.min(o.hv, o.hvAt ? o.hvAt(g0, g1) : Infinity) - dy;
+        const h = altoMotivo(mm_, g1 - g0, hv);
+        if (h === null) return null;
+        if (!torcido || mm_ === 'hoja') return { g0, g1, h, dy };
+        const [y0, y1] = rango(h, dy);
+        const pts = envMundo(mm_, g0, g1, y0, y1, mirror);
+        return pts && apoyaBien(i, pts, g0, g1, liso) ? { g0, g1, h, dy } : null;
+      };
+      if (!torcido || mm_ === 'hoja') return prueba(gl, true);
+      const r = prueba(gl, true) ?? prueba(gt, false);
+      if (r || !tz) return r;
+      // último recurso: se separa del travesaño hasta el tramo girado y apoya solo en las aristas
+      const dy = o.anchor === 'top' ? o.yRail - (tz.z1 - tz.giro - 1) : tz.z0 + tz.giro + 1 - o.yRail;
+      if (dy <= 0) return null;
+      const q = prueba(gt, false, dy);
+      if (q) out.avisos.push(`${o.zona}: algún motivo se separa un poco del travesaño para apoyar en las aristas del barrote retorcido (sus extremos son rectos y más estrechos).`);
+      return q;
+    };
     const poner = (mm_: Motivo): boolean => {
-      if (mm_ === 'C') {
-        const need = altoMinC(g);
-        if (hv < need) return false;
-        const h = Math.min(hv, need + 6);
-        const [y0, y1] = y(h);
-        return add(curvaEn(f, { c: 'C', x0: g0, x1: g1, y0, y1, zc: o.zc, mirror, lados: ['l', 'r', rail] }), 'C', h);
-      }
-      if (mm_ === 'S') {
-        if (hv < g * 0.8) return false;
-        const h = Math.min(hv, g * 1.9);
-        const [y0, y1] = y(h);
-        return add(curvaEn(f, { c: 'S', x0: g0, x1: g1, y0, y1, zc: o.zc, mirror, lados: ['l', 'r', rail] }), 'S', h);
-      }
-      if (mm_ === 'espiral') {
-        const h = altoEspiral(g);
-        if (hv < h) return false;
-        const [y0, y1] = y(h);
-        return add(curvaEn(f, { c: 'espiral', x0: g0, x1: g1, y0, y1, zc: o.zc, mirror, lados: ['l', 'r', rail], libre: true }), 'espiral', h);
-      }
-      if (mm_ === 'aro') {
-        if (hv < g) return false;
-        const cy = o.anchor === 'top' ? o.yRail - g / 2 : o.yRail + g / 2;
-        return add(aroEn(f, { cx: (g0 + g1) / 2, cy, d: g, zc: o.zc, lados: ['l', 'r', rail] }), 'aro', g);
-      }
-      if (mm_ === 'rombo') {
-        if (hv < g * 1.15) return false;
-        const h = Math.min(hv, g * 1.6);
-        const [y0, y1] = y(h);
-        return add(curvaEn(f, { c: 'rombo', x0: g0, x1: g1, y0, y1, zc: o.zc, mirror: false, lados: ['l', 'r', rail] }), 'rombo', h);
-      }
-      if (mm_ === 'corazon') {
-        if (hv < g * 0.85) return false;
-        const h = Math.min(hv, g * 1.05);
-        const [y0, y1] = y(h);
-        return add(curvaEn(f, { c: 'corazon', x0: g0, x1: g1, y0, y1, zc: o.zc, mirror: false, lados: ['l', 'r', rail] }), 'corazon', h);
-      }
-      if (mm_ === 'hoja') {
-        // pareja de hojas en V que nacen de los dos barrotes y se abren hacia el centro del hueco
-        const need = g * 0.85;
-        if (hv < need) return false;
-        const ang = Math.PI / 4, L = (g * 0.46) / Math.sin(ang);
-        const yb = o.anchor === 'top' ? o.yRail - need : o.yRail + g * 0.22;
-        for (const [xb, s] of [[g0 - 1, 1], [g1 + 1, -1]] as const) {
-          const hj = hojaEn(f, { xb, yb, ang: s * ang, L, zc: o.zc });
-          out.ids.push(hj.id); out.contactos.push(hj.contacto); anota(out, 'hoja');
+      const q = medir(mm_);
+      if (!q) return false;
+      const { g0, g1, h, dy } = q;
+      const g = g1 - g0;
+      const [y0, y1] = rango(h, dy);
+      const lados: Lado[] = dy > 0 ? ['l', 'r'] : ['l', 'r', rail];
+      switch (mm_) {
+        case 'C': case 'S': case 'rombo': case 'corazon':
+          return add(curvaEn(f, { c: mm_, x0: g0, x1: g1, y0, y1, zc: o.zc, mirror: CON_MANO.has(mm_) && mirror, lados }), mm_, h + dy);
+        case 'espiral':
+          return add(curvaEn(f, { c: 'espiral', x0: g0, x1: g1, y0, y1, zc: o.zc, mirror, lados, libre: true }), 'espiral', h + dy);
+        case 'aro':
+          return add(aroEn(f, { cx: (g0 + g1) / 2, cy: (y0 + y1) / 2, d: g, zc: o.zc, lados }), 'aro', g + dy);
+        case 'hoja': {
+          // pareja de hojas en V que nacen de los dos barrotes y se abren hacia el centro del hueco
+          const yb = o.anchor === 'top' ? y0 + g * 0.12 : y0 + g * 0.22;
+          for (const [xb, sg] of [[g0 - 1, 1], [g1 + 1, -1]] as const) {
+            const hj = hojaEn(f, { xb, yb, ang: sg * HOJA_ANG, L: HOJA_L * g, zc: o.zc });
+            out.ids.push(hj.id); out.contactos.push(hj.contacto); anota(out, 'hoja');
+          }
+          out.alto = Math.max(out.alto, h);
+          return true;
         }
-        out.alto = Math.max(out.alto, need);
-        return true;
+        default: return false;
       }
-      return false;
     };
     if (poner(m)) return;
     if ((m === 'C' || m === 'espiral') && !centro && poner('S')) {
@@ -539,13 +598,10 @@ function anchoC(h: number): number {
   const key = h.toFixed(1);
   const hit = memoAnchoC.get(key);
   if (hit) return hit;
-  let lo = VB * 2, hi = h;
-  for (let k = 0; k < 16; k++) {
-    const mid = (lo + hi) / 2;
-    if (altoMinC(mid) + 4 <= h) lo = mid; else hi = mid;
-  }
-  memoAnchoC.set(key, lo);
-  return lo;
+  let tw = Math.floor(((h - 4 + 14.5) / 2.225) * 2) / 2 + 1;
+  while (tw > VB * 2 && altoMinC(tw) + 4 > h) tw -= 0.5;
+  memoAnchoC.set(key, tw);
+  return tw;
 }
 let ratioEspiral = 0;
 function anchoFriso(m: Motivo, h: number): number {
@@ -557,7 +613,10 @@ function anchoFriso(m: Motivo, h: number): number {
     case 'C': return anchoC(h);
     case 'espiral': {
       if (!ratioEspiral) { const e = ajustar('espiral', 100, null, false).e; ratioEspiral = (e.u1 - e.u0) / (e.v1 - e.v0); }
-      return h * ratioEspiral;
+      // la barra no escala: se corrige el ancho hasta que la espiral mida justo h de alto
+      let tw = h * ratioEspiral;
+      for (let k = 0; k < 3; k++) tw *= h / altoEspiral(tw);
+      return tw;
     }
     case 'hoja': return h * 0.5;
     default: return h * 0.5; // hueco libre
@@ -623,9 +682,11 @@ export function planFriso(span: number, objetivo: number, patron: Motivo[], sime
   if (!best) return null;
   const seq = secuenciaFriso(patron, best.n, simetria);
   const total = (h: number) => seq.reduce((s, it) => s + anchoFriso(it.m, h), 0);
-  let lo = best.h * 0.7, hi = best.h * 1.3;
-  for (let k = 0; k < 30; k++) { const mid = (lo + hi) / 2; if (total(mid) <= span) lo = mid; else hi = mid; }
-  const h = Math.floor(lo * 10) / 10;
+  // el ancho de cada motivo es casi proporcional al alto: unas pocas correcciones bastan
+  let hh = best.h;
+  for (let k = 0; k < 4; k++) hh *= span / total(hh);
+  while (total(hh) > span) hh -= 0.5;
+  const h = Math.floor(hh * 10) / 10;
   const items = seq.map((s) => ({ m: s.m, w: anchoFriso(s.m, h), mirror: s.mirror }));
   const sep = Math.max(0, (span - items.reduce((s, it) => s + it.w, 0)) / (items.length + 1));
   if (simetria && best.n % 2 === 1 && CON_MANO.has(secuencia(patron, best.n, true)[(best.n - 1) / 2].m)) {
@@ -635,7 +696,8 @@ export function planFriso(span: number, objetivo: number, patron: Motivo[], sime
 }
 
 /** Coloca los motivos de un friso ya planificado entre xa y el travesaño en y0. */
-export function frisoMotivos(f: Forja, plan: PlanFriso, o: { xa: number; y0: number; zc: number }): Deco {
+export function frisoMotivos(f: Forja, plan: PlanFriso, o: { xa: number; y0: number; zc: number; invertir?: boolean }): Deco {
+  if (o.invertir) plan = { ...plan, items: [...plan.items].reverse().map((it) => ({ ...it, mirror: !it.mirror })) };
   const out = decoVacia();
   out.avisos = [...plan.avisos];
   out.alto = plan.h;
@@ -652,10 +714,11 @@ export function frisoMotivos(f: Forja, plan: PlanFriso, o: { xa: number; y0: num
       const hj = hojaEn(f, { xb: (x0 + x1) / 2, yb: y0 - 1, ang: 0, L: h + 2, zc: o.zc });
       out.ids.push(hj.id); out.contactos.push(hj.contacto, [hj.contacto[0], r1(y1), o.zc]); anota(out, 'hoja');
     } else if (it.m !== 'vacio') {
-      p = curvaEn(f, { c: it.m, x0, x1, y0, y1, zc: o.zc, mirror: it.mirror, lados: ['t', 'b'], name: 'del friso' });
+      p = curvaEn(f, { c: it.m, x0, x1, y0, y1, zc: o.zc, mirror: it.mirror, lados: ['t', 'b'], name: 'del friso', libre: it.m === 'espiral' });
       if (!p && it.m === 'C') p = curvaEn(f, { c: 'S', x0, x1, y0, y1, zc: o.zc, mirror: it.mirror, lados: ['t', 'b'], name: 'del friso' });
     }
     if (p) { out.ids.push(p.id); out.contactos.push(...p.contactos); anota(out, it.m); }
+    else if (it.m !== 'vacio' && it.m !== 'hoja') out.avisos.push(`Friso: ${unNombre(it.m)} no se ha podido ajustar a la banda y ese hueco se queda libre.`);
     piezas.push(p);
   }
   // contactos laterales: con el montante en los extremos y entre vecinos que se tocan a la misma altura
@@ -1030,19 +1093,19 @@ function buildPuerta(v: ParamValues) {
       h.cChapa.push(...cosido([xa, y0 + s, zf], [xb, y0 + s, zf]), ...cosido([xa, ym, zf], [xb, ym, zf]), ...cosido([xa, y0 + s, zf], [xa, ym, zf]), ...cosido([xb, y0 + s, zf], [xb, ym, zf]));
     }
     // motivos entre barrotes (la segunda hoja es el reflejo de la primera)
-    const filas: { yRail: number; anchor: 'top' | 'bottom'; regionH: number; dosFilas: boolean; patron: Motivo[]; zona: string }[] = [];
-    if (decoArriba) filas.push({ yRail: yTB, anchor: 'top', regionH: upperH, dosFilas: decoAbajo && zocalo, patron: patSup, zona: 'Paño superior' });
+    const filas: { yRail: number; anchor: 'top' | 'bottom'; regionH: number; dosFilas: boolean; patron: Motivo[]; zona: string; barY: [number, number] }[] = [];
+    if (decoArriba) filas.push({ yRail: yTB, anchor: 'top', regionH: upperH, dosFilas: decoAbajo && zocalo, patron: patSup, zona: 'Paño superior', barY: [upperBot, yTB] });
     if (decoAbajo) filas.push(zocalo
-      ? { yRail: upperBot, anchor: 'bottom', regionH: upperH, dosFilas: decoArriba, patron: patInf, zona: 'Paño inferior' }
-      : { yRail: y0 + s, anchor: 'bottom', regionH: lowerH, dosFilas: false, patron: patInf, zona: 'Paño inferior' });
+      ? { yRail: upperBot, anchor: 'bottom', regionH: upperH, dosFilas: decoArriba, patron: patInf, zona: 'Paño inferior', barY: [upperBot, yTB] }
+      : { yRail: y0 + s, anchor: 'bottom', regionH: lowerH, dosFilas: false, patron: patInf, zona: 'Paño inferior', barY: [y0 + s, ym] });
     for (const fl of filas) {
       const hv = Math.min(g * 2.6, fl.regionH * (fl.dosFilas ? 0.38 : 0.62));
-      const out = filaMotivos(f, { xa, xb, xs, d, tw, yRail: fl.yRail, anchor: fl.anchor, hv, zc, patron: fl.patron, simetria, invertir: !hingeLeft, zona: fl.zona });
+      const out = filaMotivos(f, { xa, xb, xs, d, tw, barY: fl.barY, yRail: fl.yRail, anchor: fl.anchor, hv, zc, patron: fl.patron, simetria, invertir: !hingeLeft, zona: fl.zona });
       h.deco.push(...out.ids); h.decoC.push(...out.contactos); h.cuenta = sumaCuenta(h.cuenta, out.cuenta); h.avisos.push(...out.avisos);
     }
     // friso
     if (plan) {
-      const out = frisoMotivos(f, plan, { xa, y0: yF, zc });
+      const out = frisoMotivos(f, plan, { xa, y0: yF, zc, invertir: !hingeLeft });
       h.deco.push(...out.ids); h.decoC.push(...out.contactos); h.cuentaFriso = out.cuenta; h.avisos.push(...out.avisos);
     }
     // remate superior
@@ -1416,7 +1479,7 @@ function buildPuerta(v: ParamValues) {
     id: 'puerta-verja',
     title: 'Puerta de verja',
     craft: 'soldadura',
-    summary: `Puerta de verja de ${nH > 1 ? 'dos hojas' : 'una hoja'} de ${Math.round(W / 10)} × ${Math.round(H / 10)} cm${nH > 1 ? ' cada una' : ''}, ${formaTxt}${zocalo ? ', zócalo de chapa' : ''}${nRet ? ', barrotes retorcidos' : ''}${decor ? `, ${resumenMotivos(cTodo)}` : ''}${nPuntas ? `, ${remate === 'lanza' ? 'lanzas' : 'pinchos'}` : ''}. ${ac.label}.`,
+    summary: `Puerta de verja de ${nH > 1 ? 'dos hojas' : 'una hoja'} de ${Math.round(W / 10)} × ${Math.round(H / 10)} cm${nH > 1 ? ' cada una' : ''}, ${formaTxt}${zocalo ? ', zócalo de chapa' : ''}${nRet ? (nRet === nBar * nH * (zocalo ? 1 : 2) ? ', barrotes retorcidos' : ', barrotes lisos y retorcidos') : ''}${decor ? `, ${resumenMotivos(cTodo)}` : ''}${nPuntas ? `, ${remate === 'lanza' ? 'lanzas' : 'pinchos'}` : ''}. ${ac.label}.`,
     difficulty: modo === 'curvada' && (decor > 0 || forma === 'arco') ? 3 : 2,
     hours: Math.round(horas * 2) / 2,
     paint: ac.hex,

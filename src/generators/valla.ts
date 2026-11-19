@@ -233,7 +233,7 @@ function build(v: ParamValues) {
     for (const [patron, anchor, zona] of [[patSup, 'top', 'Paño superior'], [patInf, 'bottom', 'Paño inferior']] as const) {
       if (!patronActivo(patron)) continue;
       const hv = Math.min(g * 2.6, regionH * (dos ? 0.36 : 0.45));
-      const out = filaMotivos(f, { xa, xb, xs: rp.xs, d, tw: ret.tw, yRail: anchor === 'top' ? barTop : barBot, anchor, hv, zc, patron, simetria, zona });
+      const out = filaMotivos(f, { xa, xb, xs: rp.xs, d, tw: ret.tw, barY: [barBot, barTop], yRail: anchor === 'top' ? barTop : barBot, anchor, hv, zc, patron, simetria, zona });
       deco.push(...out.ids); decoC.push(...out.contactos); cPanos = sumaCuenta(cPanos, out.cuenta); avisos.push(...out.avisos);
     }
     // remate
@@ -525,7 +525,7 @@ function build(v: ParamValues) {
     id: 'valla',
     title: 'Valla',
     craft: 'soldadura',
-    summary: `Valla de ${nT} tramo${nT > 1 ? 's' : ''} de ${(Lt / 1000).toFixed(2).replace('.', ',')} m y ${Math.round(Hp / 10)} cm de alto, ${forma === 'barrotes' ? `de barrotes (remate ${remTxt})` : forma === 'lamas' ? 'de lamas horizontales' : 'de malla'}${nPuntas ? ` con ${puntasSel === 'lanza' ? 'lanzas' : 'pinchos'}` : ''}${nRet ? ', barrotes retorcidos' : ''}${totalMotivos(cTodo) ? `, ${resumenMotivos(cTodo)}` : ''}. ${ac.label}.`,
+    summary: `Valla de ${nT} tramo${nT > 1 ? 's' : ''} de ${(Lt / 1000).toFixed(2).replace('.', ',')} m y ${Math.round(Hp / 10)} cm de alto, ${forma === 'barrotes' ? `de barrotes (remate ${remTxt})` : forma === 'lamas' ? 'de lamas horizontales' : 'de malla'}${nPuntas ? ` con ${puntasSel === 'lanza' ? 'lanzas' : 'pinchos'}` : ''}${nRet ? (nRet === totBar ? ', barrotes retorcidos' : ', barrotes lisos y retorcidos') : ''}${totalMotivos(cTodo) ? `, ${resumenMotivos(cTodo)}` : ''}. ${ac.label}.`,
     difficulty: modo === 'curvada' && hayDeco ? 3 : forma === 'malla' ? 1 : 2,
     hours: Math.round(horas * 2) / 2,
     paint: ac.hex,

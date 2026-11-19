@@ -6,6 +6,7 @@ import { consejosSoldadura, fuentesSoldadura } from '../data/tips-soldadura';
 import { consejosCarpinteria, fuentesCarpinteria } from '../data/tips-carpinteria';
 import { ensambles, fuentesEnsambles } from '../data/ensambles';
 import { Level } from '../components/bits';
+import { JointThumb, JointViewer } from '../components/JointViewer';
 
 type Area = 'soldadura' | 'carpinteria' | 'ensambles';
 const AREAS: { id: Area; label: string; intro: string }[] = [
@@ -65,13 +66,22 @@ function TipList({ tips, sources }: { tips: Tip[]; sources: Source[] }) {
   );
 }
 
+const GLUE = { si: 'Con cola', no: 'Sin cola', opcional: 'Cola opcional' } as const;
+
 function JointList({ joints, sources }: { joints: Joint[]; sources: Source[] }) {
   const [trad, setTrad] = useState<'' | Joint['tradition']>('');
   const groups: { id: Joint['tradition']; label: string }[] = [
     { id: 'occidental', label: 'Ensambles clásicos de taller' },
     { id: 'japonesa', label: 'Carpintería japonesa' },
   ];
-  const GLUE = { si: 'Con cola', no: 'Sin cola', opcional: 'Cola opcional' } as const;
+  const shown = groups.filter((g) => !trad || trad === g.id);
+  const goto = (id: string) => {
+    const el = document.getElementById(`ensamble-${id}`);
+    if (!el) return;
+    const smooth = !matchMedia('(prefers-reduced-motion: reduce)').matches;
+    el.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'start' });
+    el.focus({ preventScroll: true });
+  };
   return (
     <div className="tips-layout">
       <div className="cats" role="group" aria-label="Tradición">
@@ -79,24 +89,53 @@ function JointList({ joints, sources }: { joints: Joint[]; sources: Source[] }) 
         {groups.map((g) => <button key={g.id} aria-pressed={trad === g.id} onClick={() => setTrad(g.id)}>{g.label}<span>{joints.filter((j) => j.tradition === g.id).length}</span></button>)}
       </div>
       <div>
-        {groups.filter((g) => !trad || trad === g.id).map((g) => (
+        <p className="jx-intro">Cada ensamble está en 3D: ábrelo y ciérralo, móntalo paso a paso y gíralo para verlo por dentro. Las medidas de los modelos son de ejemplo; las proporciones salen de las fuentes enlazadas.</p>
+        <nav className="jx-index" aria-label="Índice de ensambles">
+          {shown.map((g) => {
+            const list = joints.filter((j) => j.tradition === g.id);
+            return (
+              <div key={g.id}>
+                <p className="jx-index-label">{g.label}<span>{list.length} ensambles</span></p>
+                <ul className="jx-cards">
+                  {list.map((j) => (
+                    <li key={j.id}>
+                      <button type="button" className="jx-card" onClick={() => goto(j.id)}>
+                        <JointThumb id={j.id} />
+                        <span className="jx-card-text">
+                          <b>{j.name}</b>
+                          {j.nameOriginal && <em lang="ja-Latn">{j.nameOriginal}</em>}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            );
+          })}
+        </nav>
+        {shown.map((g) => (
           <section className="tip-group" key={g.id}>
             <h2>{g.label}</h2>
             {joints.filter((j) => j.tradition === g.id).map((j) => (
-              <article className="joint" key={j.id}>
-                <div className="joint-head">
-                  <h3>{j.name}</h3>
-                  {j.nameOriginal && <em lang="ja-Latn">{j.nameOriginal}</em>}
-                  <span className="chip"><Level value={j.difficulty} /></span>
-                  <span className="chip">{GLUE[j.glue]}</span>
+              <article className="jx-joint" key={j.id} id={`ensamble-${j.id}`} tabIndex={-1} aria-labelledby={`ensamble-${j.id}-t`}>
+                <JointViewer id={j.id} />
+                <div className="jx-text">
+                  <div className="jx-head">
+                    <h3 id={`ensamble-${j.id}-t`}>{j.name}</h3>
+                    {j.nameOriginal && <em lang="ja-Latn">{j.nameOriginal}</em>}
+                    <div className="jx-chips">
+                      <span className="chip"><Level value={j.difficulty} /></span>
+                      <span className="chip">{GLUE[j.glue]}</span>
+                    </div>
+                  </div>
+                  <p>{j.description}</p>
+                  <div className="two">
+                    <div className="block"><h3>Dónde usarlo</h3><ul className="dots">{j.uses.map((u) => <li key={u}>{u}</li>)}</ul></div>
+                    <div className="block"><h3>Herramientas</h3><ul className="dots">{j.tools.map((u) => <li key={u}>{u}</li>)}</ul></div>
+                  </div>
+                  <div className="block"><h3>Cómo se hace</h3><ol className="todo">{j.how.map((h, i) => <li key={i}><span>{h}</span></li>)}</ol></div>
+                  <Sources ids={j.sourceIds} all={sources} />
                 </div>
-                <p>{j.description}</p>
-                <div className="two">
-                  <div className="block"><h3>Dónde usarlo</h3><ul className="dots">{j.uses.map((u) => <li key={u}>{u}</li>)}</ul></div>
-                  <div className="block"><h3>Herramientas</h3><ul className="dots">{j.tools.map((u) => <li key={u}>{u}</li>)}</ul></div>
-                </div>
-                <div className="block"><h3>Cómo se hace</h3><ol className="todo">{j.how.map((h, i) => <li key={i}><span>{h}</span></li>)}</ol></div>
-                <Sources ids={j.sourceIds} all={sources} />
               </article>
             ))}
           </section>

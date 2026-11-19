@@ -185,10 +185,13 @@ const piloto = (d: number) => Math.round(d * (2 / 3) * 0.7 * 2) / 2;
 const fmtD = (d: number) => String(d).replace('.', ',');
 const plural = (n: number, uno: string, varios: string) => `${n} ${n === 1 ? uno : varios}`;
 
-/** Letras de la lista de corte: A…Z y después AA, AB… */
+/**
+ * Letras de la lista de corte: A…Y y después Z1, Z2… (así la lista, que se ordena con comparación
+ * numérica, sigue en orden: «AA» quedaría entre la A y la B).
+ */
 function letras() {
   const m = new Map<string, string>();
-  const code = (i: number): string => (i < 26 ? String.fromCharCode(65 + i) : code(Math.floor(i / 26) - 1) + String.fromCharCode(65 + (i % 26)));
+  const code = (i: number): string => (i < 25 ? String.fromCharCode(65 + i) : `Z${i - 24}`);
   return (k: string) => {
     if (!m.has(k)) m.set(k, code(m.size));
     return m.get(k)!;
@@ -209,7 +212,6 @@ export const modular: Generator = {
   params: [
     {
       key: 'distribucion', label: 'Cuerpos y huecos', type: 'custom', editor: 'layout', default: DEFAULT_LAYOUT, group: 'Distribución',
-      help: 'Toca un hueco para elegir qué lleva. Arrastra una balda para cambiar altos y el canto entre cuerpos para cambiar anchos.',
     },
     { key: 'alto', label: 'Alto total', type: 'number', min: 400, max: 2400, step: 10, unit: 'mm', default: 850, group: 'Medidas', help: 'Del suelo a lo más alto, tapa incluida. Los huecos se reparten el alto interior.' },
     { key: 'fondo', label: 'Fondo', type: 'number', min: 250, max: 650, step: 10, unit: 'mm', default: 450, group: 'Medidas', help: 'Fondo de los costados, trasera incluida. Puertas y frentes salen su grueso por delante.' },
@@ -355,8 +357,8 @@ function build(v: ParamValues) {
     });
     // zócalo: frente y travesaño trasero entre costados, bajo la base
     if (base === 'zocalo') {
-      for (const [z, name] of [[D - T, 'Zócalo'], [ztb, 'Travesaño trasero del zócalo']] as const) {
-        ids.push(b.panel({ ref: L(`${name}|${wI}|${hb}`), name, material: mat, thickness: T, face: [wI, hb], normal: 'z', at: [xL, 0, z], grain: 'x' }));
+      for (const z of [D - T, ztb]) {
+        ids.push(b.panel({ ref: L(`zocalo|${wI}|${hb}`), name: 'Zócalo (delante y detrás)', material: mat, thickness: T, face: [wI, hb], normal: 'z', at: [xL, 0, z], grain: 'x' }));
         const yz = hb >= 70 ? [hb / 3, (2 * hb) / 3] : [hb / 2];
         const m = (union === 'tornillo' ? tornillos : espigas)([xL, xR].flatMap((x) => yz.map((y): Vec3 => [x, y, z + T / 2])), 'x');
         marks.push(...m);
@@ -542,7 +544,7 @@ function build(v: ParamValues) {
       'Repasa la lista de corte: las medidas son finales. Si te cortan el tablero en la tienda, lleva la lista impresa.',
       `Corta los ${cuerpos.length * 2} costados a ${mm(hCost)} × ${mm(dc)} con un tope, para que salgan idénticos.`,
       `Base, techo y baldas de cada cuerpo miden el ancho del cuerpo menos dos gruesos de tablero (${mm(2 * T)})${union === 'ranura' ? `, más ${mm(2 * RAN)} que entran en las ranuras` : ''}.`,
-      ...(frentes ? [`Puertas y frentes de cajón se cortan ${G} mm más estrechos que el hueco que tapan (${fmtD(G / 2)} mm por lado): es la holgura entre frentes.`] : []),
+      ...(frentes ? [`Puertas y frentes de cajón se cortan ${G} mm más estrechos que el cuerpo que tapan (${fmtD(G / 2)} mm por lado): es la holgura entre frentes.`] : []),
       'Escribe la letra de cada pieza en una cara que no se vaya a ver y marca qué canto va delante.',
       ...(mat === 'pino' ? ['En el pino alistonado, deja la veta de costados y puertas en vertical y la de baldas y tapa a lo largo.'] : []),
     ],
@@ -561,7 +563,11 @@ function build(v: ParamValues) {
       'Junta los dos costados de un cuerpo con sargentos, a ras por abajo y con las caras interiores hacia arriba.',
       `Mide siempre desde el pie del costado y traza con escuadra la cara inferior de cada pieza horizontal (${alturasCuerpo.join('; ')}).`,
       ...(union === 'ranura'
-        ? tecRanura.how.slice(1)
+        ? [
+            ...tecRanura.how.slice(1),
+            `La ranura del techo${base === 'patas' || base === 'ninguna' ? ' y la de la base quedan' : ' queda'} abierta por el extremo del costado: es un galce y se abre igual.`,
+            ...(base === 'zocalo' ? [`El zócalo no va en ranura: se une a los costados con tubillones de Ø8 mm, taladrados a ${profTub} mm en el costado.`] : []),
+          ]
         : union === 'tubillon'
           ? [`Marca en el costado ${nz} tubillones por pieza, repartidos en el fondo, y taládralos a ${profTub} mm con tope.`]
           : [`Marca ${nz} tornillos por pieza sobre el centro de cada línea, repartidos en el fondo, y taladra desde la cara interior con la broca de paso de ${fmtD(dTor)} mm.`, 'Avellana después por la cara exterior.']),
@@ -594,7 +600,7 @@ function build(v: ParamValues) {
           : union === 'tubillon'
             ? 'Encola los tubillones en las testas de base, baldas y techo y preséntalas de pie sobre sus agujeros, sin cerrar del todo.'
             : `Pon de pie base, baldas y techo sobre sus líneas, a ras por delante, y atornilla desde fuera del costado con piloto de ${fmtD(pilotT)} mm en la testa.`,
-        ...(base === 'zocalo' ? [`El zócalo va bajo la base, a ras por delante, y el travesaño trasero a ras por detrás: los dos de ${mm(hb)} de alto.`] : []),
+        ...(base === 'zocalo' ? [`Las dos tablas del zócalo van bajo la base, una a ras por delante y otra a ras por detrás: las dos de ${mm(hb)} de alto.`] : []),
         'Baja el segundo costado encima, encajando todo a la vez desde un extremo, y fíjalo igual.',
         ...(pc.nDiv || (union === 'ranura' && c.huecos.some((h) => h.t === 'd'))
           ? [union === 'ranura' ? 'Los divisores entran en una ranura abierta en las baldas de arriba y abajo: encólalos al cerrar la caja.' : `Coloca ${c.huecos.filter((h) => h.t === 'd').length > 1 ? 'los divisores' : 'el divisor'} centrado en su hueco y fíjalo a través de la balda de abajo y la de arriba.`]

@@ -1,0 +1,122 @@
+/* ---------- visor de ensambles ---------- */
+.jv { display: grid; gap: 12px; min-width: 0; align-content: start; }
+.jv-stage {
+  position: relative; aspect-ratio: 10 / 7; border-radius: var(--r-l); overflow: hidden;
+  border: 1.5px solid var(--ink); background: #f6f1e7; isolation: isolate;
+}
+.jv-stage { --jv-zoom: 1; }
+/* el lienzo y la imagen fija se amplían igual (--jv-zoom) y el recuadro recorta el margen sobrante */
+.jv-stage .viewer.jv-viewer, .jv-poster img, .jv-thumb img {
+  position: absolute; width: calc(var(--jv-zoom) * 100%); height: calc(var(--jv-zoom) * 100%);
+  left: calc((1 - var(--jv-zoom)) * 50%); top: calc((1 - var(--jv-zoom)) * 50%);
+}
+.jv-stage .viewer.jv-viewer { border: 0; border-radius: 0; background: #f6f1e7; }
+/* en el móvil, el desliz vertical desplaza la página; el horizontal gira el modelo */
+.jv-stage .viewer, .jv-stage canvas { touch-action: pan-y !important; }
+
+.jv-poster {
+  position: absolute; inset: 0; z-index: 1; display: block; width: 100%; height: 100%;
+  margin: 0; padding: 0; border: 0; background: #f6f1e7; cursor: pointer; color: inherit;
+}
+.jv-poster img { max-width: none; object-fit: cover; }
+.jv-poster:focus-visible { outline-offset: -4px; }
+.jv-badge {
+  position: absolute; left: 10px; bottom: 10px; display: inline-flex; align-items: center; gap: 6px;
+  min-height: 32px; padding: 0 12px; border-radius: 999px; background: rgb(29 27 24 / 0.86); color: var(--paper);
+  font-size: 0.82rem; font-weight: 650; transition: background 0.2s var(--ease);
+}
+.jv-poster:hover .jv-badge, .jv-poster:focus-visible .jv-badge { background: var(--red); }
+.jv-nogl { position: absolute; inset: 0; display: grid; place-items: center; padding: 20px; text-align: center; color: var(--ink-2); font-size: 0.9rem; }
+.jv-wait, .jv-thumb .jv-wait {
+  position: absolute; inset: 0;
+  background: linear-gradient(100deg, var(--paper-2) 30%, var(--paper) 50%, var(--paper-2) 70%) 0 0 / 220% 100%;
+  animation: jv-shimmer 1.4s linear infinite;
+}
+@keyframes jv-shimmer { to { background-position: -220% 0; } }
+
+.jv-hint {
+  position: absolute; left: 10px; bottom: 10px; z-index: 2; pointer-events: none; display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 9px; border-radius: 999px; background: rgb(246 241 231 / 0.88); color: var(--ink-3); font-size: 0.76rem; font-weight: 600;
+  animation: jv-fade 4s var(--ease) forwards;
+}
+@keyframes jv-fade { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
+.jv-toggle-float { position: absolute; right: 10px; bottom: 10px; z-index: 3; background: rgb(255 253 248 / 0.94); min-height: 40px; }
+
+.jv-controls { display: grid; gap: 10px; }
+.jv-row { display: flex; align-items: center; gap: 10px 14px; flex-wrap: wrap; }
+.jv-toggle { min-width: 116px; min-height: 42px; }
+.jv-range { display: flex; align-items: center; gap: 8px; flex: 1 1 200px; min-height: 42px; font-size: 0.76rem; font-weight: 650; color: var(--ink-3); }
+.jv-range input { flex: 1; min-width: 0; height: 28px; margin: 0; accent-color: var(--red); cursor: pointer; }
+.jv-steps { display: flex; flex-wrap: wrap; gap: 6px; }
+.jv-steps button {
+  display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 5px 12px 5px 6px;
+  border: 1.5px solid var(--line); border-radius: var(--r-m); background: var(--card); color: var(--ink-2);
+  font-size: 0.86rem; font-weight: 620; text-align: left; cursor: pointer; transition: border-color 0.2s, background 0.2s, color 0.2s;
+}
+.jv-steps button b {
+  flex: none; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%;
+  background: var(--paper-2); color: var(--ink); font-family: var(--font-display); font-size: 0.92rem; font-weight: 750;
+}
+.jv-steps button:hover { border-color: var(--ink-3); color: var(--ink); }
+.jv-steps button[aria-pressed='true'] { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+.jv-steps button[aria-pressed='true'] b { background: var(--rule); color: var(--rule-ink); }
+.jv-caption { font-size: 0.88rem; color: var(--ink-2); min-height: 2.8em; max-width: 60ch; }
+.jv-compact .jv-stage { border-width: 1px; }
+
+.jv-thumb { position: relative; display: block; aspect-ratio: 10 / 7; overflow: hidden; background: #f6f1e7; }
+.jv-thumb { --jv-zoom: 1; }
+.jv-thumb img { max-width: none; object-fit: cover; transition: transform 0.35s var(--ease); }
+
+/* ---------- pestaña «Ensambles sin tornillos» ---------- */
+.jx-intro { color: var(--ink-2); max-width: 64ch; font-size: 0.95rem; margin-bottom: 14px; }
+.jx-index { display: grid; gap: 18px; padding-bottom: 28px; margin-bottom: 8px; border-bottom: 1.5px solid var(--ink); }
+.jx-index-label { font-family: var(--font-display); font-weight: 700; font-size: 1.02rem; margin-bottom: 8px; display: flex; gap: 8px; align-items: baseline; }
+.jx-index-label span { font-family: var(--font-body); font-size: 0.8rem; font-weight: 600; color: var(--ink-3); }
+.jx-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: 10px; }
+.jx-card {
+  display: grid; align-content: start; gap: 0; width: 100%; padding: 0; border: 1px solid var(--line); border-radius: var(--r-m);
+  background: var(--card); overflow: hidden; text-align: left; cursor: pointer; color: inherit;
+  transition: border-color 0.2s, box-shadow 0.25s var(--ease), transform 0.25s var(--ease);
+}
+.jx-card:hover { border-color: var(--ink); box-shadow: var(--shadow); }
+.jx-card:hover img { transform: scale(1.04); }
+.jx-card:active { transform: translateY(1px); }
+.jx-card-text { display: grid; gap: 1px; padding: 8px 10px 10px; border-top: 1px solid var(--line); }
+.jx-card-text b { font-size: 0.86rem; font-weight: 650; line-height: 1.25; }
+.jx-card-text em { font-style: normal; font-size: 0.76rem; font-weight: 650; color: var(--red-deep); }
+
+.jx-joint {
+  display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(0, 1fr); gap: 28px; align-items: start;
+  padding-block: 30px; border-bottom: 1px solid var(--line); scroll-margin-top: calc(var(--header-h) + 16px);
+}
+.jx-joint:focus { outline: none; }
+.jx-joint:focus-visible { outline: 2px solid var(--ink); outline-offset: 6px; }
+.jx-joint > .jv { position: sticky; top: calc(var(--header-h) + 16px); }
+.jx-text { display: grid; gap: 14px; min-width: 0; }
+.jx-head { display: grid; gap: 8px; }
+.jx-head h3 { font-size: clamp(1.4rem, 2.4vw, 1.75rem); font-weight: 720; }
+.jx-head em { font-style: normal; color: var(--red-deep); font-weight: 650; }
+.jx-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.jx-text > p { color: var(--ink-2); max-width: 68ch; }
+.jx-text .two { grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); }
+
+@media (max-width: 1120px) {
+  .jx-joint { grid-template-columns: minmax(0, 1fr); gap: 18px; }
+  .jx-joint > .jv { position: static; max-width: 680px; }
+}
+@media (max-width: 860px) {
+  .jx-index { gap: 14px; padding-bottom: 20px; }
+  /* en el móvil el índice es una tira que se desliza en horizontal */
+  .jx-cards {
+    display: flex; overflow-x: auto; scroll-snap-type: x proximity; scrollbar-width: none; gap: 8px;
+    margin-inline: calc(var(--gutter) * -1); padding-inline: var(--gutter); padding-bottom: 4px;
+  }
+  .jx-cards::-webkit-scrollbar { display: none; }
+  .jx-cards > li { flex: 0 0 136px; scroll-snap-align: start; }
+  .jx-joint { padding-block: 24px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .jv-wait, .jv-thumb .jv-wait { animation: none; }
+  .jv-hint { animation: none; }
+  .jx-card:hover img { transform: none; }
+}

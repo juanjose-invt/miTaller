@@ -1,0 +1,136 @@
+/* Editor de distribución del mueble modular (alzado frontal interactivo).
+   Usa los tokens de app.css: papel, tinta, madera y el amarillo de metro para la selección. */
+
+.le { display: grid; gap: 12px; min-width: 0; }
+
+.le-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; }
+.le-head p { display: flex; align-items: baseline; gap: 10px; }
+.le-head strong { font-family: var(--font-display); font-stretch: 85%; font-weight: 720; font-size: 1.1rem; }
+.le-dim { font-family: var(--font-display); font-stretch: 80%; font-weight: 620; color: var(--ink-2); }
+.le-hint { font-size: 0.82rem; color: var(--ink-3); font-weight: 600; }
+
+/* lienzo: el dibujo es a escala; si no cabe, se desplaza dentro de su marco (nunca la página) */
+.le-canvas {
+  position: relative; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain;
+  border: 1.5px solid var(--ink); border-radius: var(--r-m);
+  background-color: var(--card);
+  background-image:
+    linear-gradient(rgb(29 27 24 / 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(29 27 24 / 0.045) 1px, transparent 1px);
+  background-size: 20px 20px;
+  scrollbar-width: thin; scrollbar-color: var(--line) transparent;
+}
+.le-canvas.scrolls { box-shadow: inset -14px 0 12px -12px rgb(29 27 24 / 0.25); }
+.le-canvas svg { display: block; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
+.le-canvas text { font-family: var(--font-display); font-stretch: 80%; font-weight: 650; font-variant-numeric: tabular-nums; }
+
+.le-floor { stroke: var(--ink); stroke-width: 1.5; }
+.le-carcass { fill: var(--wood-soft); stroke: var(--ink); stroke-width: 1.2; }
+.le-carcass.is-body { stroke-width: 2.2; }
+.le-wood { fill: var(--wood-soft); stroke: var(--ink); stroke-width: 1; }
+.le-top { stroke-width: 1.2; }
+.le-plinth { fill: var(--paper-3); stroke: var(--ink); stroke-width: 1; }
+
+/* huecos */
+.le-hueco { cursor: pointer; outline: none; }
+.le-hole { fill: #d9ccb2; stroke: rgb(29 27 24 / 0.55); stroke-width: 0.8; }
+.le-shadow { stroke: rgb(29 27 24 / 0.16); stroke-width: 5; }
+.le-front { fill: var(--card); stroke: var(--ink); stroke-width: 1.2; transition: fill 0.15s; }
+.le-handle { stroke: var(--ink); stroke-width: 3; stroke-linecap: round; }
+.le-split { stroke: var(--ink); stroke-width: 1.2; }
+.le-hinge { fill: var(--ink-3); }
+.le-cota { fill: var(--ink); paint-order: stroke; stroke: var(--card); stroke-width: 3.5px; stroke-linejoin: round; pointer-events: none; }
+.le-hueco.t-a .le-cota, .le-hueco.t-d .le-cota { stroke: #d9ccb2; }
+.le-hit { fill: transparent; }
+.le-ring { fill: none; stroke: none; pointer-events: none; }
+@media (hover: hover) {
+  .le-hueco:hover .le-front { fill: var(--paper); }
+  .le-hueco:hover .le-hole { fill: #e2d6be; }
+}
+/* selección: amarillo de metro con borde de tinta */
+.le-hueco.is-sel .le-hole { fill: color-mix(in srgb, var(--rule) 70%, #d9ccb2); }
+.le-hueco.is-sel .le-front { fill: var(--rule); }
+.le-hueco.is-sel .le-cota { stroke: var(--rule); }
+.le-hueco.is-sel .le-ring { stroke: var(--ink); stroke-width: 2.5; }
+.le-hueco:focus-visible .le-ring { stroke: var(--ink); stroke-width: 2.5; stroke-dasharray: 5 3; }
+.le-hueco.is-sel:focus-visible .le-ring { stroke-dasharray: none; stroke-width: 3.5; }
+
+/* tiradores de arrastre: balda (vertical) y canto (horizontal) */
+.le-grip { outline: none; touch-action: none; }
+.le-grip.v { cursor: ns-resize; }
+.le-grip.h { cursor: ew-resize; }
+.le-grip-hit { fill: transparent; }
+.le-pill { fill: var(--ink); stroke: var(--card); stroke-width: 1.5; transition: fill 0.15s; }
+.le-pill-ico { fill: none; stroke: var(--rule); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
+.le-guide { stroke: var(--red); stroke-width: 1.5; stroke-dasharray: 4 3; opacity: 0; pointer-events: none; transition: opacity 0.15s; }
+.le-grip:focus-visible .le-pill, .le-grip.is-drag .le-pill { fill: var(--red); stroke: var(--rule); stroke-width: 3; }
+.le-grip:focus-visible .le-guide, .le-grip.is-drag .le-guide { opacity: 1; }
+@media (hover: hover) { .le-grip:hover .le-pill { fill: var(--red-deep); } .le-grip:hover .le-guide { opacity: 0.6; } }
+
+/* cotas de ancho */
+.le-wcota line { stroke: var(--ink-3); stroke-width: 1; }
+.le-wcota text { fill: var(--ink-2); font-size: 12px; }
+.le-wcota.is-body line { stroke: var(--ink); }
+.le-wcota.is-body text { fill: var(--ink); font-size: 13px; }
+
+/* avisos */
+.le-alert { display: flex; gap: 8px; align-items: flex-start; font-size: 0.88rem; font-weight: 600; padding: 8px 12px; border-radius: var(--r-s); line-height: 1.4; }
+.le-alert svg { flex: none; margin-top: 2px; }
+.le-alert.warn { background: var(--warn-bg); border: 1px solid #e2b96a; color: #5b3d06; }
+.le-alert.info { background: var(--paper-2); color: var(--ink-2); }
+.le-alert.empty { padding: 0; min-height: 0; }
+
+/* paneles */
+.le-panel { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: var(--r-m); background: var(--card); }
+.le-panel header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; }
+.le-panel h4 { font-family: var(--font-display); font-stretch: 85%; font-weight: 720; font-size: 1.05rem; letter-spacing: -0.01em; }
+.le-panel header span { font-size: 0.85rem; color: var(--ink-3); font-weight: 600; }
+
+.le-types { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.le-type {
+  display: grid; justify-items: center; align-content: center; gap: 2px; min-height: 76px; padding: 8px 4px;
+  border: 1.5px solid var(--line); border-radius: var(--r-s); background: var(--card); cursor: pointer;
+  font-weight: 650; font-size: 0.9rem; line-height: 1.15; text-align: center;
+  transition: border-color 0.15s, background 0.15s, transform 0.15s var(--ease);
+}
+.le-type small { font-size: 0.72rem; font-weight: 550; color: var(--ink-3); }
+.le-type:hover { border-color: var(--ink-3); }
+.le-type:active { transform: translateY(1px); }
+.le-type[aria-pressed='true'] { border-color: var(--ink); background: var(--rule); }
+.le-type[aria-pressed='true'] small { color: #5b4a10; }
+.le-ticon { margin-bottom: 2px; }
+.le-ticon .i-hole { fill: #d9ccb2; stroke: var(--ink); stroke-width: 1.3; }
+.le-ticon .i-front { fill: var(--card); stroke: var(--ink); stroke-width: 1.3; }
+.le-ticon .i-line { stroke: var(--ink); stroke-width: 2; }
+.le-ticon .i-wood { fill: var(--wood-soft); stroke: var(--ink); stroke-width: 1; }
+.le-ticon .i-handle { stroke: var(--ink); stroke-width: 2.4; stroke-linecap: round; }
+.le-ticon .i-dot { fill: var(--ink-3); }
+
+.le-row { display: grid; gap: 10px; }
+.le-num { display: flex; align-items: center; gap: 12px; }
+.le-num label { font-size: 0.9rem; font-weight: 650; color: var(--ink-2); min-width: 5.5em; }
+.le-num .numbox { width: 132px; }
+.le-num .numbox input { padding-block: 9px; }
+.le-actions { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 168px), 1fr)); gap: 6px; }
+.le-actions .btn { min-height: 42px; padding: 0 10px; font-size: 0.86rem; gap: 6px; justify-content: flex-start; }
+.le-actions .btn[aria-disabled='true'] { opacity: 0.5; cursor: not-allowed; }
+.le-actions .btn[aria-disabled='true']:active { transform: none; }
+.le-danger:not([aria-disabled='true']):hover { background: #f6dcd5; border-color: var(--red-deep); color: var(--red-deep); }
+
+.le-note { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 10px; font-size: 0.85rem; color: var(--ink-2); line-height: 1.45; padding: 2px 2px 0; }
+.le-note > svg { margin-top: 2px; color: var(--ink-3); }
+.le-note div { display: grid; gap: 6px; }
+.le-note strong { color: var(--ink); }
+.le-keys { color: var(--ink-3); }
+@media (hover: none) { .le-keys { display: none; } }
+
+@media (max-width: 520px) {
+  .le-type { min-height: 72px; font-size: 0.84rem; }
+  .le-type small { display: none; }
+  .le-actions { grid-template-columns: 1fr 1fr; }
+  .le-actions .btn { font-size: 0.8rem; padding: 0 8px; white-space: normal; line-height: 1.15; text-align: left; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .le-front, .le-pill, .le-guide, .le-type { transition: none; }
+}

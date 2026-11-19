@@ -492,7 +492,7 @@ function OrientField({ p, onAxis, idp }: { p: FreePart; onAxis: (a: Axis) => voi
   const order: Axis[] = p.kind === 'tablero' ? ['y', 'x', 'z'] : ['y', 'x', 'z'];
   return (
     <div className="field">
-      <span className="lab" id={`${idp}-or`}>Orientación</span>
+      <span className="sr-only" id={`${idp}-or`}>Orientación</span>
       <div className="segmented free-seg" role="group" aria-labelledby={`${idp}-or`}>
         {order.map((a) => (
           <button key={a} type="button" aria-pressed={p.axis === a} onClick={() => onAxis(a)}>{labels[a]}<small>{AX_LABEL[a]}</small></button>
@@ -544,6 +544,8 @@ function AddPanel({ onAdd }: { onAdd: (p: FreePart) => void }) {
       <Section title="Medidas">
         <MaterialField p={draft} set={(m) => set({ material: m })} idp="add" />
         <SizeFields p={draft} set={set} idp="add" />
+      </Section>
+      <Section title="Orientación">
         <OrientField p={draft} onAxis={(a) => set({ axis: a })} idp="add" />
       </Section>
       <button type="button" className="btn primary free-wide" onClick={() => onAdd(draft)}><Plus size={18} aria-hidden />Añadir {KIND_LABEL[draft.kind].toLowerCase()} · {partLabel(draft).replace(`${KIND_LABEL[draft.kind]} `, '')}</button>

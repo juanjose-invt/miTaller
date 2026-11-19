@@ -85,9 +85,29 @@ export function warnings(project: Project): string[] {
   const out: string[] = [];
   const [w, h, d] = project.dims;
   if (h > 1000 && h / Math.min(w, d) > 3) out.push('Es alto y estrecho: fíjalo a la pared para que no pueda volcar.');
-  const wood = project.parts.filter((p) => MATERIALS[p.material].kind === 'madera' && p.stockKind === 'tablero' && p.shape === 'box');
-  const longShelf = wood.find((p) => p.size[1] <= 18 && p.size[1] === Math.min(...p.size) && Math.max(p.size[0], p.size[2]) > 820);
-  if (longShelf) out.push(`«${longShelf.name}» salva más de 80 cm con tablero de ${Math.round(longShelf.size[1])} mm: con peso puede combarse. Añade un apoyo intermedio, un canto de refuerzo o un tablero más grueso.`);
+  // baldas largas: mayor tramo sin apoyo por debajo, medido sobre las piezas reales
+  const shelves = project.parts.filter((p) => MATERIALS[p.material].kind === 'madera' && p.stockKind === 'tablero' && p.shape === 'box' && !p.rot && p.size[1] <= 18 && p.size[1] === Math.min(...p.size));
+  for (const sh of shelves) {
+    const li = sh.size[0] >= sh.size[2] ? 0 : 2, wi = li === 0 ? 2 : 0;
+    const a0 = sh.pos[li] - sh.size[li] / 2, a1 = sh.pos[li] + sh.size[li] / 2;
+    const bottom = sh.pos[1] - sh.size[1] / 2;
+    const supports = project.parts
+      .filter((q) => q !== sh && !q.rot && Math.abs(q.pos[1] + q.size[1] / 2 - bottom) < 1.5
+        && Math.abs(q.pos[wi] - sh.pos[wi]) < (q.size[wi] + sh.size[wi]) / 2 && q.pos[li] + q.size[li] / 2 > a0 && q.pos[li] - q.size[li] / 2 < a1)
+      .map((q) => [Math.max(a0, q.pos[li] - q.size[li] / 2), Math.min(a1, q.pos[li] + q.size[li] / 2)])
+      .sort((x, y) => x[0] - y[0]);
+    // una balda encajada entre costados apoya en sus dos extremos aunque nada quede debajo
+    let cursor = a0, span = 0;
+    for (const [s0, s1] of supports) {
+      span = Math.max(span, s0 - cursor);
+      cursor = Math.max(cursor, s1);
+    }
+    span = Math.max(span, a1 - cursor);
+    if (span > 820) {
+      out.push(`«${sh.name}» salva unos ${Math.round(span / 10)} cm sin apoyo con tablero de ${Math.round(sh.size[1])} mm: con peso puede combarse. Añade un apoyo intermedio, un canto de refuerzo o un tablero más grueso.`);
+      break;
+    }
+  }
   const tooLong = project.parts.find((p) => p.stockKind === 'lineal' && p.cut[0] > (MATERIALS[p.material].kind === 'metal' ? BAR_LENGTH.acero : BAR_LENGTH.madera));
   if (tooLong) out.push(`«${tooLong.name}» mide ${Math.round(tooLong.cut[0])} mm, más que la barra habitual: pide un largo especial en tu almacén.`);
   if (Math.max(w, d) > 2000 || h > 2000) out.push('Supera los 2 m en alguna medida: comprueba que cabe por puertas, pasillos y escalera antes de montarlo.');
