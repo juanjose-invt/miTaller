@@ -3,11 +3,15 @@
 Manuales paso a paso, en 3D y pieza a pieza, para construir tus propios muebles y elementos de
 **carpintería** y **soldadura**. Pensado para quien empieza desde cero.
 
-- **Plantillas** listas para construir (mesas, estanterías, bancos, conejera, cuna, jaula, leñero, mesa de trabajo de acero…).
-- **Configurador paramétrico**: medidas, forma, detalles y tipo de unión (incluidas uniones sin tornillos). El modelo 3D, la lista de corte, la compra y la tornillería se recalculan con cada cambio.
-- **Paso a paso en 3D**: las piezas de cada paso se resaltan, con la posición de cada tornillo, tubillón, punto y cordón de soldadura. Vista de despiece y selección de piezas.
-- **Manual en PDF** generado en el navegador: portada, seguridad, lista de la compra, despiece, lista de corte y todos los pasos ilustrados.
-- **Consejos** de soldadura, carpintería y ensambles sin tornillos (occidentales y japoneses), cada uno con su fuente.
+- **Plantillas** listas para construir (mesas, estanterías, bancos, conejera, cuna, jaula, leñero, mesa de trabajo, puertas, vallas y rejas de forja…).
+- **Configurador guiado**: recorrido por apartados con opciones en miniatura 3D, cotas sobre el modelo y tiradores para estirarlo arrastrando; coste con tus precios, peso estimado, avisos de diseño, deshacer/rehacer, guardar y compartir por enlace.
+- **Mueble modular**: se compone por cuerpos y huecos (baldas, puertas, cajones) sobre un alzado interactivo.
+- **Editor de forja**: patrones de motivos (volutas, aros, rombos, corazones, hojas, barrotes retorcidos) por paño, con simetría.
+- **Modo libre**: colocar listones, tableros y tubos a mano, con imanes; la web saca la lista de corte y el manual.
+- **Paso a paso en 3D**: la cámara enfoca cada paso, los tornillos entran y los cordones se dibujan; despiece, escala humana y progreso guardado.
+- **Plan de corte** optimizado para barras y tableros, **plantillas 1:1** de las piezas curvas y **manual en PDF**.
+- **Aprende**: itinerario de proyectos, consejos con fuente y ensambles sin tornillos (occidentales y japoneses) en 3D interactivo.
+- **Mi taller**: diseños guardados y comparador, herramientas que ya tienes y precios de tu almacén (todo en el navegador).
 
 ## Desarrollo
 

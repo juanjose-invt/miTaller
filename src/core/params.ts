@@ -73,7 +73,7 @@ export function fromQuery(g: Generator, q: URLSearchParams): ParamValues {
 /** Clave del parámetro numérico que controla cada eje al arrastrar los tiradores del modelo. */
 export function dragKeys(g: Generator, values: ParamValues): Partial<Record<Axis, string>> {
   const out: Partial<Record<Axis, string>> = {};
-  const guess: Record<Axis, RegExp> = { x: /^(ancho|largo|anchohoja|tramo|luz)/i, y: /^(alto|altura)/i, z: /^(fondo|profundidad)/i };
+  const guess: Record<Axis, RegExp> = { x: /^(ancho|largo)$/i, y: /^(alto|altura)$/i, z: /^(fondo|profundidad)$/i };
   for (const axis of ['x', 'y', 'z'] as Axis[]) {
     const key = g.dragAxes?.[axis] ?? g.params.find((p) => p.type === 'number' && guess[axis].test(p.key))?.key;
     const p = g.params.find((q) => q.key === key);

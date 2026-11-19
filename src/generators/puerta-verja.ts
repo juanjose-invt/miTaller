@@ -449,6 +449,7 @@ export function filaMotivos(f: Forja, o: {
   const gaps = huecos(o.xa, o.xb, o.xs, o.d, o.tw);
   const seq = secuencia(o.patron, gaps.length, o.simetria, o.invertir);
   const rail: Lado = o.anchor === 'top' ? 't' : 'b';
+  const omitidos = new Map<Motivo, number>();
   const add = (p: Pieza | null, m: Motivo, alto: number) => {
     if (!p) return false;
     out.ids.push(p.id); out.contactos.push(...p.contactos); anota(out, m); out.alto = Math.max(out.alto, alto);
@@ -518,12 +519,15 @@ export function filaMotivos(f: Forja, o: {
       return false;
     };
     if (poner(m)) return;
-    if ((m === 'C' || m === 'espiral') && poner('S')) {
+    if ((m === 'C' || m === 'espiral') && !centro && poner('S')) {
       out.avisos.push(`${o.zona}: algún hueco es demasiado bajo para ${unNombre(m)}; se ha puesto una voluta en S, que cabe en menos altura.`);
       return;
     }
-    out.avisos.push(`${o.zona}: no cabe ${unNombre(m)} en un hueco de ${Math.round(g)} mm de ancho con ${Math.round(Math.max(0, hv))} mm de alto libre; ese hueco se queda sin adorno.`);
+    omitidos.set(m, (omitidos.get(m) ?? 0) + 1);
   });
+  for (const [m, n] of omitidos) {
+    out.avisos.push(`${o.zona}: ${n === 1 ? `en un hueco no cabe ${unNombre(m)}` : `en ${n} huecos no cabe ${unNombre(m)}`} (falta alto libre junto al travesaño) y ${n === 1 ? 'se queda' : 'se quedan'} sin adorno.`);
+  }
   out.avisos = [...new Set(out.avisos)];
   return out;
 }

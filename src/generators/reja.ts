@@ -282,7 +282,7 @@ function build(v: ParamValues) {
     proceso,
     lineas: [
       `Marco (${mc.label.toLowerCase()}): 2 montantes de ${mm(yS)} y ${travesanos.length} travesaños de ${mm(span)}.`,
-      `Barrotes (${sp.label.toLowerCase()}): ${xs.length} por tramo con un hueco libre de ${mm(g)}${inter ? `: ${xs.length} de ${mm(yM - F)} abajo y ${xs.length} de ${mm(upperH)} arriba` : ` de ${mm(upperH)}`}.`,
+      `Barrotes (${sp.label.toLowerCase()}): ${xs.length} por tramo con un hueco libre de ${mm(g)}${inter ? `: ${xs.length} de ${mm(yM - F)} abajo y ${xs.length} de ${mm(upperH)} arriba` : ` de ${mm(upperH)}`}${nRet ? `; ${nRet} de ellos retorcidos, que se compran ya entorchados` : ''}.`,
       ...(arco ? [`Arco: ${mm(W)} de luz y ${mm(rise)} de flecha. Los barrotes bajo el arco tienen cada uno su largo: córtalos después de presentar el arco, midiendo en su sitio.`] : []),
       ...(patillas ? [`Patillas: ${anclaIds.length} trozos de pletina ${PAT.w}×${PAT.t} de ${mm(PAT.l)}; abre en cola de pez el extremo que irá al muro (rájalo con la radial y separa las dos mitades) para que agarre en el mortero.`] : [`Orejetas: ${anclaIds.length} trozos de pletina ${ORE.w}×${ORE.t} de ${mm(ORE.l)}, con un taladro cerca del extremo libre del diámetro que pida el tornillo que vayas a usar.`]),
     ],
