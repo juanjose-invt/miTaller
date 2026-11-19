@@ -1,16 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import {
-  ArrowLeft, ArrowRight, CircleCheck, Clock, Download, Expand, Eye, Lightbulb, Loader, Paintbrush, RotateCcw,
-  Scissors, Shield, SlidersHorizontal, Tag, TriangleAlert, Wrench, X, Zap, Hammer,
+  ArrowLeft, ArrowRight, Bookmark, Check, CircleCheck, Clock, Download, Expand, Eye, Focus, Hammer, Lightbulb, Loader, Paintbrush,
+  RotateCcw, Scissors, Shield, SlidersHorizontal, Tag, TriangleAlert, User, Wrench, X, Zap,
 } from 'lucide-react';
 import type { Project, Step } from '../core/types';
 import { buildProject, fromQuery, getGenerator, toQuery } from '../generators';
 import { cutList, fmtCut, hardwareList, stockList, toolList, type CutLine } from '../core/derive';
+import { cost, costLines, euros, kilos, warnings, weight } from '../core/insights';
+import { KEYS, useStored, type SavedDesign } from '../core/store';
 import { Viewer3D } from '../components/Viewer3D';
 import { CraftChip, Level, dimsLabel, hoursLabel } from '../components/bits';
+import { ProjectExtras, TechniqueJoint, resolveFree } from '../components/extras';
 
-type Tab = 'pasos' | 'piezas' | 'compra' | 'seguridad';
+type Tab = 'pasos' | 'piezas' | 'corte' | 'compra' | 'seguridad';
 const KIND_ICON = { preparar: Wrench, cortar: Scissors, montar: Hammer, soldar: Zap, acabar: Paintbrush } as const;
 const KIND_LABEL = { preparar: 'Preparación', cortar: 'Corte', montar: 'Montaje', soldar: 'Soldadura', acabar: 'Acabado' } as const;
 
@@ -18,12 +21,14 @@ export function ProjectPage() {
   const { id = '' } = useParams();
   const [q, setQ] = useSearchParams();
   const g = getGenerator(id);
+  const free = useMemo(() => (id === 'libre' ? resolveFree(q.get('d') ?? '') : null), [id, q]);
   const values = useMemo(() => (g ? fromQuery(g, q) : null), [g, q]);
-  const project = useMemo(() => (g && values ? buildProject(g, values) : null), [g, values]);
-  if (!g || !project || !values) {
+  const project = useMemo(() => (free ? free.project : g && values ? buildProject(g, values) : null), [free, g, values]);
+  if (!project) {
     return <div className="wrap empty"><h1>No encontramos ese proyecto</h1><Link className="btn primary" to="/plantillas">Ver plantillas</Link></div>;
   }
-  const preset = g.presets.find((p) => p.id === q.get('plantilla'));
+  const preset = g?.presets.find((p) => p.id === q.get('plantilla'));
+  const query = g && values ? toQuery(g, values) : `d=${encodeURIComponent(q.get('d') ?? '')}`;
   const stepParam = Number(q.get('paso') ?? '1');
   const step = Math.min(project.steps.length - 1, Math.max(0, (Number.isFinite(stepParam) ? stepParam : 1) - 1));
   const setStep = (i: number) => {
@@ -31,29 +36,43 @@ export function ProjectPage() {
     next.set('paso', String(i + 1));
     setQ(next, { replace: true });
   };
-  return <ProjectView key={g.id} project={project} title={preset?.name ?? project.title} step={step} setStep={setStep} editHref={`/crear/${g.id}?${toQuery(g, values)}`} />;
+  return (
+    <ProjectView
+      key={`${id}?${query}`} project={project} title={preset?.name ?? project.title} step={step} setStep={setStep}
+      gen={id} query={query} editHref={free ? `/libre?d=${encodeURIComponent(q.get('d') ?? '')}` : `/crear/${id}?${query}`}
+    />
+  );
 }
 
-function ProjectView({ project, title, step, setStep, editHref }: { project: Project; title: string; step: number; setStep: (i: number) => void; editHref: string }) {
+function ProjectView({ project, title, step, setStep, editHref, gen, query }: {
+  project: Project; title: string; step: number; setStep: (i: number) => void; editHref: string; gen: string; query: string;
+}) {
   const [tab, setTab] = useState<Tab>('pasos');
   const [explode, setExplode] = useState(false);
   const [guides, setGuides] = useState(true);
+  const [focus, setFocus] = useStored<boolean>('vista-enfoque', true);
+  const [figure, setFigure] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [resetKey, setResetKey] = useState(0);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState('');
+  const [done, setDone] = useStored<number[]>(KEYS.progress(`${gen}?${query}`), []);
+  const [designs, setDesigns] = useStored<SavedDesign[]>(KEYS.designs, []);
   const cuts = useMemo(() => cutList(project), [project]);
   const stock = useMemo(() => stockList(project), [project]);
   const hardware = useMemo(() => hardwareList(project), [project]);
-  const tools = useMemo(() => toolList(project), [project]);
   const total = project.steps.length;
   const s = project.steps[step];
   const selPart = project.parts.find((p) => p.id === selected);
   const selLine = selPart ? cuts.find((c) => c.ref === selPart.ref) : undefined;
   const ruleRef = useRef<HTMLOListElement>(null);
+  const doneCount = done.filter((i) => i < total).length;
+  const saved = designs.some((d) => d.gen === gen && d.query === query);
 
   useEffect(() => {
-    ruleRef.current?.querySelector('[aria-current="step"]')?.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'smooth' });
+    const el = ruleRef.current?.querySelector<HTMLElement>('[aria-current="step"]');
+    const box = ruleRef.current;
+    if (el && box) box.scrollTo({ left: el.offsetLeft - box.clientWidth / 2 + el.clientWidth / 2, behavior: 'smooth' });
   }, [step]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -74,8 +93,7 @@ function ProjectView({ project, title, step, setStep, editHref }: { project: Pro
     setBusy(true);
     try {
       const { downloadManual } = await import('../pdf/manual');
-      const saved = await downloadManual(project, title);
-      if (saved) setToast('Manual listo. Búscalo en tu carpeta de descargas.');
+      if (await downloadManual(project, title)) setToast('Manual listo. Búscalo en tu carpeta de descargas.');
     } catch (e) {
       console.error(e);
       setToast('No se ha podido generar el PDF. Vuelve a intentarlo.');
@@ -83,6 +101,14 @@ function ProjectView({ project, title, step, setStep, editHref }: { project: Pro
       setBusy(false);
     }
   };
+  const toggleDone = (i: number) => setDone((old) => (old.includes(i) ? old.filter((x) => x !== i) : [...old, i]));
+  const saveDesign = () => {
+    if (saved) return;
+    setDesigns((old) => [{ id: `${Date.now()}`, name: `${title} · ${dimsLabel(project.dims)}`, gen, query, date: new Date().toISOString() }, ...old]);
+    setToast('Guardado en Mi taller.');
+  };
+  const kg = weight(project);
+  const warns = warnings(project);
 
   return (
     <div className="wrap">
@@ -96,11 +122,13 @@ function ProjectView({ project, title, step, setStep, editHref }: { project: Pro
               <span className="chip">{dimsLabel(project.dims)}</span>
               <span className="chip"><Clock size={13} aria-hidden />{hoursLabel(project.hours)}</span>
               <span className="chip">{project.parts.length} piezas</span>
+              {kg > 0 && <span className="chip" title="Estimación orientativa">≈ {kilos(kg)}</span>}
               <span className="chip"><Level value={project.difficulty} /></span>
             </div>
           </div>
           <div className="actions">
-            <Link className="btn" to={editHref}><SlidersHorizontal size={18} aria-hidden />Cambiar medidas</Link>
+            <button className="btn" onClick={saveDesign} disabled={saved}><Bookmark size={18} aria-hidden />{saved ? 'Guardado' : 'Guardar'}</button>
+            <Link className="btn" to={editHref}><SlidersHorizontal size={18} aria-hidden />Cambiar el diseño</Link>
             <button className="btn primary" onClick={download} disabled={busy}>
               {busy ? <Loader size={18} aria-hidden className="spin" /> : <Download size={18} aria-hidden />}
               {busy ? 'Generando…' : 'Manual en PDF'}
@@ -112,13 +140,15 @@ function ProjectView({ project, title, step, setStep, editHref }: { project: Pro
       <div className="proj">
         <div className="proj-stage">
           <Viewer3D
-            project={project} step={step} explode={explode ? 0.6 : 0} ghost={guides} labels={guides} selected={selected} resetKey={resetKey}
-            onSelect={setSelected} label={`Modelo 3D de ${title}, paso ${step + 1} de ${total}: ${s.title}`}
+            project={project} step={step} explode={explode ? 0.6 : 0} ghost={guides} labels={guides} focus={focus && !explode} figure={figure}
+            selected={selected} resetKey={resetKey} onSelect={setSelected} label={`Modelo 3D de ${title}, paso ${step + 1} de ${total}: ${s.title}`}
           >
             <p className="viewer-hint">Arrastra para girar · rueda o pellizco para acercar · toca una pieza para identificarla</p>
             <div className="viewer-tools">
               <button className="btn small" aria-pressed={explode} onClick={() => setExplode((v) => !v)} title="Separar las piezas"><Expand size={16} aria-hidden />Despiece</button>
               <button className="btn small" aria-pressed={guides} onClick={() => setGuides((v) => !v)} title="Etiquetas, fijaciones y silueta final"><Eye size={16} aria-hidden />Guías</button>
+              <button className="btn small" aria-pressed={focus} onClick={() => setFocus(!focus)} title="La cámara se acerca a las piezas de cada paso"><Focus size={16} aria-hidden />Enfoque</button>
+              <button className="btn small" aria-pressed={figure} onClick={() => setFigure((v) => !v)} title="Persona de 1,70 m para comparar"><User size={16} aria-hidden />Escala</button>
               <button className="btn small" onClick={() => setResetKey((k) => k + 1)} title="Volver a la vista inicial"><RotateCcw size={16} aria-hidden /><span className="sr-only">Centrar vista</span></button>
             </div>
             {selPart && selLine && (
@@ -135,23 +165,35 @@ function ProjectView({ project, title, step, setStep, editHref }: { project: Pro
               <ol ref={ruleRef}>
                 {project.steps.map((st, i) => (
                   <li key={i}>
-                    <button className={i < step ? 'done' : ''} aria-current={i === step ? 'step' : undefined} onClick={() => { setStep(i); setTab('pasos'); }} title={st.title} aria-label={`Paso ${i + 1}: ${st.title}`}>{i + 1}</button>
+                    <button className={done.includes(i) ? 'done' : ''} aria-current={i === step ? 'step' : undefined} onClick={() => { setStep(i); setTab('pasos'); }} title={st.title} aria-label={`Paso ${i + 1}: ${st.title}${done.includes(i) ? ' (hecho)' : ''}`}>
+                      {i + 1}{done.includes(i) && <Check size={13} aria-hidden className="tick" />}
+                    </button>
                   </li>
                 ))}
               </ol>
             </nav>
             <button className="btn dark" onClick={() => setStep(step + 1)} disabled={step === total - 1} aria-label="Paso siguiente"><ArrowRight size={18} aria-hidden /></button>
           </div>
+          <div className="progress" role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={doneCount} aria-label="Pasos terminados">
+            <i style={{ width: `${(doneCount / total) * 100}%` }} />
+            <span>{doneCount === 0 ? 'Marca cada paso al terminarlo: tu avance se guarda en este dispositivo.' : doneCount === total ? 'Proyecto terminado. Buen trabajo.' : `${doneCount} de ${total} pasos hechos`}</span>
+          </div>
         </div>
 
         <div>
           <div className="tabs" role="tablist">
-            {([['pasos', 'Paso a paso', total], ['piezas', 'Piezas y corte', cuts.length], ['compra', 'Lista de la compra', stock.length + hardware.length], ['seguridad', 'Seguridad y notas', null]] as const).map(([k, label, n]) => (
+            {([['pasos', 'Paso a paso', total], ['piezas', 'Piezas', cuts.length], ['corte', 'Plan de corte', null], ['compra', 'Compra', stock.length + hardware.length], ['seguridad', 'Seguridad y notas', null]] as const).map(([k, label, n]) => (
               <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)}>{label}{n !== null && <span className="count">{n}</span>}</button>
             ))}
           </div>
 
-          {tab === 'pasos' && <StepCard key={step} project={project} step={s} index={step} total={total} cuts={cuts} selected={selected} onSelect={setSelected} onPrev={() => setStep(step - 1)} onNext={() => setStep(step + 1)} onDownload={download} busy={busy} />}
+          {tab === 'pasos' && (
+            <StepCard
+              key={step} project={project} step={s} index={step} total={total} cuts={cuts} selected={selected} onSelect={setSelected}
+              onPrev={() => setStep(step - 1)} onNext={() => setStep(step + 1)} onDownload={download} busy={busy}
+              done={done.includes(step)} onDone={() => { const was = done.includes(step); toggleDone(step); if (!was && step < total - 1) setStep(step + 1); }}
+            />
+          )}
 
           {tab === 'piezas' && (
             <div className="stack">
@@ -179,32 +221,14 @@ function ProjectView({ project, title, step, setStep, editHref }: { project: Pro
             </div>
           )}
 
-          {tab === 'compra' && (
-            <div className="stack">
-              <section className="stack">
-                <h2 style={{ fontSize: '1.3rem' }}>Material</h2>
-                <div className="table-wrap">
-                  <table className="data">
-                    <thead><tr><th>Material</th><th>Cantidad</th><th>Detalle</th></tr></thead>
-                    <tbody>{stock.map((l) => <tr key={l.stock}><td><strong>{l.stock}</strong></td><td className="dim">{l.buy}</td><td className="muted">{l.detail}</td></tr>)}</tbody>
-                  </table>
-                </div>
-                <p className="note">Las barras se calculan con largos habituales (2,4 m en listón, 6 m en tubo de acero) y contando la pérdida de cada corte. Comprueba el largo que vende tu almacén y añade un margen para errores.</p>
-              </section>
-              <section className="stack">
-                <h2 style={{ fontSize: '1.3rem' }}>Tornillería y consumibles</h2>
-                <Checklist id={`${project.id}-hw`} items={hardware.map((h) => `${h.qty} ${h.unit ?? 'ud'} · ${h.item}`)} />
-              </section>
-              <section className="stack">
-                <h2 style={{ fontSize: '1.3rem' }}>Herramientas</h2>
-                <Checklist id={`${project.id}-tools`} items={tools} />
-              </section>
-            </div>
-          )}
+          {tab === 'corte' && <ProjectExtras project={project} title={title} onToast={setToast} />}
+
+          {tab === 'compra' && <Shopping project={project} />}
 
           {tab === 'seguridad' && (
             <div className="stack">
               <div className="block warn"><h3><Shield size={18} aria-hidden />Antes de empezar</h3><ul className="dots">{project.safety.map((t) => <li key={t}>{t}</li>)}</ul></div>
+              {warns.length > 0 && <div className="block warn"><h3><TriangleAlert size={18} aria-hidden />Revisa este diseño</h3><ul className="dots">{warns.map((t) => <li key={t}>{t}</li>)}</ul></div>}
               {!!project.notes?.length && <div className="block"><h3><Lightbulb size={18} aria-hidden />Notas de diseño</h3><ul className="dots">{project.notes.map((t) => <li key={t}>{t}</li>)}</ul></div>}
               <div className="block"><h3><Tag size={18} aria-hidden />Configuración</h3>
                 <table className="data" style={{ minWidth: 0 }}><tbody>{project.spec.map((r) => <tr key={r.label}><td className="muted">{r.label}</td><td><strong>{r.value}</strong></td></tr>)}</tbody></table>
@@ -220,9 +244,9 @@ function ProjectView({ project, title, step, setStep, editHref }: { project: Pro
   );
 }
 
-function StepCard({ project, step, index, total, cuts, selected, onSelect, onPrev, onNext, onDownload, busy }: {
+function StepCard({ project, step, index, total, cuts, selected, onSelect, onPrev, onNext, onDownload, busy, done, onDone }: {
   project: Project; step: Step; index: number; total: number; cuts: CutLine[]; selected: string | null;
-  onSelect: (id: string | null) => void; onPrev: () => void; onNext: () => void; onDownload: () => void; busy: boolean;
+  onSelect: (id: string | null) => void; onPrev: () => void; onNext: () => void; onDownload: () => void; busy: boolean; done: boolean; onDone: () => void;
 }) {
   const kind = step.kind ?? 'montar';
   const Icon = KIND_ICON[kind];
@@ -240,7 +264,7 @@ function StepCard({ project, step, index, total, cuts, selected, onSelect, onPre
   }, [step, project, cuts]);
   return (
     <article className="step-card">
-      <div className="step-kicker"><span className="num">Paso {index + 1} de {total}</span><span className="chip"><Icon size={13} aria-hidden />{KIND_LABEL[kind]}</span></div>
+      <div className="step-kicker"><span className="num">Paso {index + 1} de {total}</span><span className="chip"><Icon size={13} aria-hidden />{KIND_LABEL[kind]}</span>{done && <span className="chip ok"><Check size={13} aria-hidden />Hecho</span>}</div>
       <h2>{step.title}</h2>
       <p className="summary">{step.summary}</p>
 
@@ -264,6 +288,7 @@ function StepCard({ project, step, index, total, cuts, selected, onSelect, onPre
         <div className="block tech">
           <h3><Wrench size={18} aria-hidden />Técnica: {step.technique.name}</h3>
           <p>{step.technique.why}</p>
+          <TechniqueJoint technique={step.technique} />
           <ul className="dots">{step.technique.how.map((h, i) => <li key={i}>{h}</li>)}</ul>
         </div>
       )}
@@ -284,34 +309,75 @@ function StepCard({ project, step, index, total, cuts, selected, onSelect, onPre
       {step.tip && <div className="block tip"><h3><Lightbulb size={18} aria-hidden />Consejo de taller</h3><p>{step.tip}</p></div>}
 
       <div className="step-foot">
-        <button className="btn" onClick={onPrev} disabled={index === 0}><ArrowLeft size={18} aria-hidden />Anterior</button>
+        <button className="btn" onClick={onPrev} disabled={index === 0}><ArrowLeft size={18} aria-hidden /><span className="lbl">Anterior</span></button>
+        <button className={`btn ${done ? '' : 'dark'}`} onClick={onDone} aria-pressed={done}><Check size={18} aria-hidden />{done ? 'Paso hecho' : index < total - 1 ? 'Hecho, siguiente' : 'Marcar como hecho'}</button>
         {index < total - 1
-          ? <button className="btn dark" onClick={onNext}>Siguiente paso<ArrowRight size={18} aria-hidden /></button>
-          : <button className="btn primary" onClick={onDownload} disabled={busy}><Download size={18} aria-hidden />{busy ? 'Generando…' : 'Descargar el manual en PDF'}</button>}
+          ? <button className="btn" onClick={onNext}><span className="lbl">Siguiente</span><ArrowRight size={18} aria-hidden /></button>
+          : <button className="btn primary" onClick={onDownload} disabled={busy}><Download size={18} aria-hidden />{busy ? 'Generando…' : 'PDF'}</button>}
       </div>
     </article>
   );
 }
 
-/** Lista para ir marcando lo que ya tienes; se recuerda en este navegador. */
-function Checklist({ id, items }: { id: string; items: string[] }) {
-  const key = `mitaller:${id}`;
-  const [done, setDone] = useState<string[]>(() => {
-    try { return JSON.parse(localStorage.getItem(key) ?? '[]'); } catch { return []; }
-  });
-  const toggle = (item: string) => {
-    const next = done.includes(item) ? done.filter((d) => d !== item) : [...done, item];
-    setDone(next);
-    try { localStorage.setItem(key, JSON.stringify(next)); } catch { /* almacenamiento no disponible */ }
+/** Lista de la compra con precios propios, tornillería y herramientas que ya tienes. */
+function Shopping({ project }: { project: Project }) {
+  const [prices, setPrices] = useStored<Record<string, number>>(KEYS.prices, {});
+  const [owned, setOwned] = useStored<string[]>(KEYS.tools, []);
+  const [have, setHave] = useStored<string[]>(`compra:${project.id}`, []);
+  const lines = useMemo(() => costLines(project), [project]);
+  const tools = useMemo(() => toolList(project), [project]);
+  const sum = cost(project, prices);
+  const setPrice = (key: string, raw: string) => {
+    const n = Number(raw.replace(',', '.'));
+    setPrices((old) => {
+      const next = { ...old };
+      if (raw.trim() === '' || !Number.isFinite(n) || n <= 0) delete next[key];
+      else next[key] = n;
+      return next;
+    });
   };
+  const toggle = (list: string[], set: (v: string[]) => void, item: string) => set(list.includes(item) ? list.filter((x) => x !== item) : [...list, item]);
+  const table = (kind: 'material' | 'fijacion') => (
+    <div className="table-wrap">
+      <table className="data shop">
+        <thead><tr><th aria-label="Ya lo tengo" /><th>Artículo</th><th className="r">Cantidad</th><th className="r">Tu precio</th><th className="r">Importe</th></tr></thead>
+        <tbody>
+          {lines.filter((l) => l.kind === kind).map((l) => {
+            const p = prices[l.key];
+            const got = have.includes(l.key);
+            return (
+              <tr key={l.key} className={got ? 'got' : ''}>
+                <td><input type="checkbox" checked={got} onChange={() => toggle(have, setHave, l.key)} aria-label={`Ya tengo: ${l.label}`} /></td>
+                <td><strong>{l.label}</strong>{l.detail && <div className="muted" style={{ fontSize: '0.84rem' }}>{l.detail}</div>}</td>
+                <td className="r dim">{l.qty.toLocaleString('es-ES')} <span className="unit">{l.unit}</span></td>
+                <td className="r"><span className="price"><input type="text" inputMode="decimal" defaultValue={p ?? ''} placeholder="—" onBlur={(e) => setPrice(l.key, e.target.value)} aria-label={`Precio por ${l.unit} de ${l.label}`} /><span>€</span></span></td>
+                <td className="r dim">{p ? euros(p * l.qty) : '—'}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
   return (
-    <div className="block">
-      <div className="checklist">
-        {items.map((item) => (
-          <label key={item}><input type="checkbox" checked={done.includes(item)} onChange={() => toggle(item)} /><span>{item}</span></label>
-        ))}
+    <div className="stack">
+      <div className="total-bar">
+        <div><span className="muted">Coste estimado con tus precios</span><strong>{sum.priced ? euros(sum.total) : 'Sin precios todavía'}</strong></div>
+        <p>{sum.priced < sum.lines ? `Faltan ${sum.lines - sum.priced} precios. Escribe lo que cuesta cada artículo en tu almacén: se recuerdan para todos tus proyectos.` : 'Todos los artículos tienen precio.'}</p>
       </div>
-      <p className="note" style={{ marginTop: 4 }}>Marca lo que ya tienes: se guarda en este dispositivo.</p>
+      <section className="stack"><h2 className="h-sub">Material</h2>{table('material')}
+        <p className="note">Las barras se calculan con largos habituales (2,4 m en listón, 6 m en tubo de acero) y contando la pérdida de cada corte. En «Plan de corte» puedes cambiar el largo y ver cómo sacar cada pieza.</p>
+      </section>
+      <section className="stack"><h2 className="h-sub">Tornillería y consumibles</h2>{table('fijacion')}</section>
+      <section className="stack">
+        <h2 className="h-sub">Herramientas</h2>
+        <div className="block">
+          <div className="checklist">
+            {tools.map((t) => <label key={t}><input type="checkbox" checked={owned.includes(t)} onChange={() => toggle(owned, setOwned, t)} /><span>{t}</span></label>)}
+          </div>
+          <p className="note" style={{ marginTop: 4 }}>Marca las que ya tienes: se guardan en <Link to="/mi-taller/herramientas">Mi taller</Link> y sirven para todos los proyectos.</p>
+        </div>
+      </section>
     </div>
   );
 }

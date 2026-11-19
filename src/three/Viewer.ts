@@ -872,7 +872,7 @@ export class Viewer {
     // los tiradores mantienen tamaño constante en pantalla
     for (const g of this.handleGroup.children) {
       const d = this.camera.position.distanceTo(g.position);
-      g.scale.setScalar((d * 0.011) / this.camera.zoom);
+      g.scale.setScalar((d * 0.019) / this.camera.zoom);
     }
     if (this.figure?.visible) this.figure.rotation.y = Math.atan2(this.camera.position.x - this.figure.position.x, this.camera.position.z - this.figure.position.z);
     // los tornillos entran y los cordones crecen al cambiar de paso

@@ -21,6 +21,31 @@ export function Level({ value }: { value: 1 | 2 | 3 }) {
 }
 
 const thumbs = new Map<string, string>();
+/** Las miniaturas se guardan también en el navegador para que la siguiente visita sea inmediata. */
+const TKEY = 'mitaller:mini:v3:';
+function cached(id: string): string | undefined {
+  const m = thumbs.get(id);
+  if (m) return m;
+  try {
+    const s = localStorage.getItem(TKEY + id);
+    if (s) thumbs.set(id, s);
+    return s ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+function remember(id: string, url: string): void {
+  thumbs.set(id, url);
+  if (id.length > 90) return; // variantes del configurador: solo en memoria
+  try {
+    localStorage.setItem(TKEY + id, url);
+  } catch {
+    try {
+      // sin sitio: se vacían las miniaturas guardadas y se sigue
+      for (const k of Object.keys(localStorage)) if (k.startsWith('mitaller:mini:')) localStorage.removeItem(k);
+    } catch { /* almacenamiento no disponible */ }
+  }
+}
 const queue: (() => void)[] = [];
 let running = false;
 function pump() {
@@ -39,19 +64,22 @@ function pump() {
 }
 
 /** Miniatura 3D generada en el navegador a partir del propio modelo. */
-export function Thumb({ id, make, alt }: { id: string; make: () => Project; alt: string }) {
-  const [src, setSrc] = useState(thumbs.get(id));
+export function Thumb({ id, make, alt, size = [640, 480] }: { id: string; make: () => Project; alt: string; size?: [number, number] }) {
+  const [src, setSrc] = useState(() => cached(id));
   useEffect(() => {
-    if (thumbs.has(id)) {
-      setSrc(thumbs.get(id));
+    const hit = cached(id);
+    if (hit) {
+      setSrc(hit);
       return;
     }
+    setSrc(undefined);
     let alive = true;
     queue.push(() => {
       if (!alive) return;
       try {
-        const url = snapshot(make(), { width: 640, height: 480 });
-        thumbs.set(id, url);
+        const url = snapshot(make(), { width: size[0], height: size[1] });
+        if (thumbs.size > 400) thumbs.clear();
+        remember(id, url);
         setSrc(url);
       } catch {
         /* sin WebGL: se queda el marcador */

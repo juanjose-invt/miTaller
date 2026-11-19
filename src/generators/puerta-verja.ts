@@ -1,5 +1,6 @@
 import type { Generator, Mark, ParamDef, ParamValues, SourceRef, Step, Technique, Vec3 } from '../core/types';
 import { Builder, alturaArco, cordon, cordonPerimetral, hw, mm, punto, radioArco, tornillos } from '../core/builder';
+import { corazonPoints, hojaPolygon, polyLength, romboPoints, volutaPoints } from '../core/curves';
 import {
   TEC_PUNTEO, cordonesTope, fuentesSoldaduraProyecto, infoProceso, pasoCordones, pasoCortar, pasoPreparar, pasoRepasar,
   pieza, puntosTope, seguridadSoldadura, type Proceso,
@@ -112,9 +113,13 @@ export const OPC_REMATE = [
 
 // ---------- piezas lineales ----------
 /** Barrote o tramo de barrote vertical. `xMin` es su cara izquierda; queda centrado en `zc`. */
-export function barrote(f: Forja, sp: BarSpec, name: string, len: number, xMin: number, yMin: number, zc: number): string {
-  const r = f.L(`bar|${sp.key}|${fx(len)}`, name);
+export function barrote(f: Forja, sp: BarSpec, name: string, len: number, xMin: number, yMin: number, zc: number, retorcido = false): string {
   const at: Vec3 = [xMin, yMin, zc - sp.d / 2];
+  if (retorcido && sp.kind === 'cuad') {
+    const rt = f.L(`ret|${sp.key}|${fx(len)}`, `${name} retorcido`);
+    return f.b.retorcido({ ref: rt.ref, name: rt.name, side: sp.d, length: len, axis: 'y', at, stock: `Cuadradillo retorcido de forja ${sp.d} mm` });
+  }
+  const r = f.L(`bar|${sp.key}|${fx(len)}`, name);
   if (sp.kind === 'red') return f.b.redondo({ ref: r.ref, name: r.name, material: 'acero', diameter: sp.d, length: len, axis: 'y', at });
   if (sp.kind === 'tubo') return f.b.tubo({ ref: r.ref, name: r.name, section: [sp.d, sp.d], wall: sp.wall ?? 1.5, length: len, axis: 'y', at });
   const id = f.b.pletina({ ref: r.ref, name: r.name, section: [sp.d, sp.d], length: len, axis: 'y', at });
@@ -139,63 +144,138 @@ export function reparto(xa: number, xb: number, d: number, hmax: number): { xs: 
   return { xs: Array.from({ length: n }, (_, i) => xa + g * (i + 1) + d * i), g };
 }
 
-/** Huecos libres entre los obstáculos (caras de montante y barrotes). */
-export function huecos(xa: number, xb: number, xs: number[], d: number): [number, number][] {
-  const edges = [xa, ...xs.flatMap((x) => [x, x + d]), xb];
-  const out: [number, number][] = [];
-  for (let i = 0; i < edges.length; i += 2) out.push([edges[i], edges[i + 1]]);
-  return out;
-}
+// =====================================================================================
+// Motor de decoración de forja: motivos, patrones repetibles y frisos
+// =====================================================================================
 
-// ---------- volutas: misma curva que dibuja el visor ----------
-function volutaPts(w: number, h: number, curve: 'C' | 'S', bar: number): Pt[] {
-  const spiral = (cx: number, cy: number, R: number, turns: number): Pt[] => {
-    const tmax = turns * Math.PI * 2;
-    const pts: Pt[] = [];
-    const n = Math.round(turns * 28);
-    for (let i = 0; i <= n; i++) {
-      const t = tmax * (0.12 + 0.88 * (i / n));
-      const r = R * (t / tmax);
-      const phi = tmax - t;
-      pts.push([cx + r * Math.cos(phi), cy + r * Math.sin(phi)]);
-    }
-    return pts;
-  };
-  const m = bar / 2;
-  const W = w - bar, H = h - bar;
-  const R = Math.min(W / 2, H / 4);
-  const top = spiral(m + W - R, m + H - R, R, 1.35);
-  const bottom: Pt[] = curve === 'C'
-    ? top.map(([x, y]): Pt => [x, 2 * m + H - y]).reverse()
-    : top.map(([x, y]): Pt => [2 * m + W - x, 2 * m + H - y]).reverse();
-  return [...top, ...bottom];
-}
-
-function volutaExt(w: number, h: number, curve: 'C' | 'S', bar: number, mirror: boolean) {
-  const pts = volutaPts(w, h, curve, bar).map(([u, v]): Pt => [mirror ? w - u : u, v]);
-  const us = pts.map((p) => p[0]), vs = pts.map((p) => p[1]);
-  return { pts, u0: Math.min(...us) - bar / 2, u1: Math.max(...us) + bar / 2, v0: Math.min(...vs) - bar / 2, v1: Math.max(...vs) + bar / 2 };
-}
-
+/** Motivos que se pueden poner en un patrón. `vacio` deja el hueco libre para espaciar. */
+export type Motivo = 'C' | 'S' | 'espiral' | 'aro' | 'rombo' | 'corazon' | 'hoja' | 'vacio';
+/** Motivos de barra curvada que dibuja el visor con las curvas de `core/curves.ts`. */
+type Curva = 'C' | 'S' | 'espiral' | 'rombo' | 'corazon';
 type Lado = 'l' | 'r' | 't' | 'b';
 
-/** Ajusta la caja de la voluta para que su curva real mida tw × th. `ok` = lo ha conseguido. */
-const memoFit = new Map<string, { w: number; h: number; e: ReturnType<typeof volutaExt>; ok: boolean }>();
-function fitVoluta(tw: number, th: number, curve: 'C' | 'S', mirror: boolean) {
-  const key = `${tw.toFixed(2)}|${th.toFixed(2)}|${curve}|${mirror}`;
+export const OPC_MOTIVO: { value: Motivo; label: string; hint?: string }[] = [
+  { value: 'C', label: 'Voluta en C', hint: 'La clásica: dos espirales hacia el mismo lado' },
+  { value: 'S', label: 'Voluta en S', hint: 'Más movida; cabe en huecos bajos' },
+  { value: 'espiral', label: 'Espiral', hint: 'Voluta simple enrollada' },
+  { value: 'aro', label: 'Aro' },
+  { value: 'rombo', label: 'Rombo' },
+  { value: 'corazon', label: 'Corazón', hint: 'Dos volutas unidas en punta' },
+  { value: 'hoja', label: 'Hojas', hint: 'Hojas de chapa soldadas al barrote' },
+  { value: 'vacio', label: 'Hueco libre', hint: 'Sin adorno: sirve para espaciar los motivos' },
+];
+const VALIDOS = new Set<string>(OPC_MOTIVO.map((o) => o.value));
+/** Motivos con mano: al reflejarlos cambian de sentido (se colocan con `mirror`). */
+const CON_MANO = new Set<Motivo>(['C', 'S', 'espiral']);
+
+const NOMBRE: Record<Motivo, [string, string, 'm' | 'f']> = {
+  C: ['voluta en C', 'volutas en C', 'f'], S: ['voluta en S', 'volutas en S', 'f'], espiral: ['espiral', 'espirales', 'f'],
+  aro: ['aro', 'aros', 'm'], rombo: ['rombo', 'rombos', 'm'], corazon: ['corazón', 'corazones', 'm'], hoja: ['hoja', 'hojas', 'f'],
+  vacio: ['hueco libre', 'huecos libres', 'm'],
+};
+const unNombre = (m: Motivo) => `${NOMBRE[m][2] === 'f' ? 'una' : 'un'} ${NOMBRE[m][0]}`;
+
+/** Lee el valor de un parámetro de patrón («C,aro,S») y descarta los códigos desconocidos. */
+export function leerPatron(v: unknown): Motivo[] {
+  if (typeof v !== 'string') return [];
+  return v.split(',').map((c) => c.trim()).filter((c) => VALIDOS.has(c)) as Motivo[];
+}
+/** Un patrón decora algo si tiene al menos un motivo que no sea hueco libre. */
+export const patronActivo = (p: Motivo[]) => p.some((m) => m !== 'vacio');
+
+export function paramPatron(key: string, label: string, def: string, help: string, visible?: (v: ParamValues) => boolean): ParamDef {
+  return { key, label, type: 'pattern', options: OPC_MOTIVO, max: 8, default: def, group: 'Decoración', help, visible };
+}
+export const paramSimetria = (visible?: (v: ParamValues) => boolean): ParamDef => ({
+  key: 'simetria', label: 'Simetría', type: 'boolean', default: true, group: 'Decoración', visible,
+  help: 'Refleja el patrón respecto al eje central: la mitad derecha es el espejo de la izquierda y las piezas con mano (volutas y espirales) se colocan dadas la vuelta.',
+});
+export const paramTipoBarrote = (visible?: (v: ParamValues) => boolean): ParamDef => ({
+  key: 'tipoBarrote', label: 'Tipo de barrote', type: 'select', default: 'liso', group: 'Material',
+  visible: (v) => (v.barrote === 'cuad12' || v.barrote === 'cuad16') && (visible ? visible(v) : true),
+  help: 'El retorcido (entorchado) solo se hace en cuadradillo macizo y se compra ya retorcido, con los extremos rectos para soldarlo.',
+  options: [
+    { value: 'liso', label: 'Liso' },
+    { value: 'retorcido', label: 'Retorcido', hint: 'Cuadradillo entorchado de forja' },
+    { value: 'alterno', label: 'Alterno liso y retorcido' },
+  ],
+});
+
+/** Qué barrotes de una fila van retorcidos (solo cuadradillo). Devuelve también si se ha podido. */
+export function barrotesRetorcidos(sel: string, sp: BarSpec, n: number): { tw: boolean[]; aviso?: string } {
+  if (sel !== 'retorcido' && sel !== 'alterno') return { tw: Array(n).fill(false) };
+  if (sp.kind !== 'cuad') return { tw: Array(n).fill(false), aviso: 'Los barrotes retorcidos solo se hacen en cuadradillo macizo: con este barrote van lisos.' };
+  return { tw: Array.from({ length: n }, (_, i) => sel === 'retorcido' || i % 2 === 1) };
+}
+/** Lo que sobresalen las aristas de un cuadradillo retorcido respecto a su cara (mm por lado). */
+export const sobreRetorcido = (d: number) => d * (Math.SQRT2 - 1) / 2;
+export const NOTA_MOTIVOS = 'Cada motivo se dimensiona con el hueco libre real: apoya en los dos barrotes (o barrote y montante) y en el travesaño, o en los dos travesaños del friso, para poder soldarlo. Si en un hueco no cabe, se cambia por otro que sí o se deja libre, y se avisa aquí.';
+export const NOTA_HOJAS = 'Las hojas de forja se compran recortadas y repujadas en chapa; aquí se dibujan de 3 mm. Se sueldan solo por la base, con un punto por cada cara, sin calentar la hoja.';
+export const NOTA_RETORCIDO = 'Los barrotes retorcidos se compran ya entorchados, con los extremos rectos para soldarlos a tope como los lisos. Al girar, sus aristas ocupan algo más que el cuadradillo: los motivos se han ajustado para apoyar en esas aristas.';
+
+/** Resumen legible: «6 volutas en C, 1 aro y 4 rombos». */
+export function resumenMotivos(cuenta: Partial<Record<Motivo, number>>): string {
+  const partes = OPC_MOTIVO.map((o) => o.value).filter((m) => m !== 'vacio' && (cuenta[m] ?? 0) > 0)
+    .map((m) => `${cuenta[m]} ${NOMBRE[m][cuenta[m] === 1 ? 0 : 1]}`);
+  return partes.length > 1 ? `${partes.slice(0, -1).join(', ')} y ${partes[partes.length - 1]}` : partes[0] ?? '';
+}
+export const sumaCuenta = (...cs: Partial<Record<Motivo, number>>[]): Partial<Record<Motivo, number>> => {
+  const out: Partial<Record<Motivo, number>> = {};
+  for (const c of cs) for (const [k, n] of Object.entries(c) as [Motivo, number][]) out[k] = (out[k] ?? 0) + n;
+  return out;
+};
+export const totalMotivos = (c: Partial<Record<Motivo, number>>) => Object.values(c).reduce((s, n) => s + (n ?? 0), 0);
+export const multiplicaCuenta = (c: Partial<Record<Motivo, number>>, k: number) =>
+  Object.fromEntries(Object.entries(c).map(([m, n]) => [m, (n ?? 0) * k])) as Partial<Record<Motivo, number>>;
+
+// ---------- geometría: la misma curva que dibuja el visor ----------
+function curvaPts(c: Curva, w: number, h: number, mirror: boolean): Pt[] {
+  if (c === 'rombo') return romboPoints(w, h, VB);
+  if (c === 'corazon') return corazonPoints(w, h, VB);
+  const p = volutaPoints(w, h, c, VB);
+  return mirror ? p.map(([u, v]): Pt => [w - u, v]) : p;
+}
+
+/**
+ * Envolvente real del tubo de barra que dibuja el visor: cada tramo de la curva desplazado
+ * medio grueso a cada lado según su normal (en los vértices del rombo el tubo no sobresale
+ * medio grueso entero, y esto lo tiene en cuenta).
+ */
+interface Env { pts: Pt[]; off: Pt[]; u0: number; u1: number; v0: number; v1: number }
+function envolvente(pts: Pt[]): Env {
+  const r = VB / 2;
+  const off: Pt[] = [];
+  for (let i = 1; i < pts.length; i++) {
+    const [a, b] = [pts[i - 1], pts[i]];
+    const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    if (L < 1e-6) continue;
+    const nx = -(b[1] - a[1]) / L, ny = (b[0] - a[0]) / L;
+    for (const q of [a, b, [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] as Pt]) off.push([q[0] + r * nx, q[1] + r * ny], [q[0] - r * nx, q[1] - r * ny]);
+  }
+  const us = off.map((q) => q[0]), vs = off.map((q) => q[1]);
+  return { pts, off, u0: Math.min(...us), u1: Math.max(...us), v0: Math.min(...vs), v1: Math.max(...vs) };
+}
+
+/**
+ * Busca la caja (w × h) que hay que dar al visor para que la curva real mida tw × th.
+ * Con `th` nulo la caja es cuadrada y solo se ajusta el ancho (espiral). `ok` = lo ha conseguido.
+ */
+const memoFit = new Map<string, { w: number; h: number; e: Env; ok: boolean }>();
+function ajustar(c: Curva, tw: number, th: number | null, mirror: boolean) {
+  const key = `${c}|${tw.toFixed(2)}|${th === null ? '-' : th.toFixed(2)}|${mirror}`;
   const hit = memoFit.get(key);
   if (hit) return hit;
-  let w = tw, h = th;
+  let w = tw, h = th ?? tw;
+  let e = envolvente(curvaPts(c, w, h, mirror));
   for (let k = 0; k < 150; k++) {
-    const e = volutaExt(w, h, curve, VB, mirror);
-    const dw = tw - (e.u1 - e.u0), dh = th - (e.v1 - e.v0);
+    const dw = tw - (e.u1 - e.u0), dh = th === null ? 0 : th - (e.v1 - e.v0);
     if (Math.abs(dw) < 0.02 && Math.abs(dh) < 0.02) break;
     w = Math.min(tw * 3, Math.max(VB * 2 + 2, w + dw * 0.9));
-    h = Math.min(th * 3, Math.max(VB * 2 + 2, h + dh * 0.9));
+    h = th === null ? w : Math.min(th * 3, Math.max(VB * 2 + 2, h + dh * 0.9));
+    e = envolvente(curvaPts(c, w, h, mirror));
   }
-  const e = volutaExt(w, h, curve, VB, mirror);
-  const out = { w, h, e, ok: Math.abs(e.u1 - e.u0 - tw) < 0.5 && Math.abs(e.v1 - e.v0 - th) < 0.5 };
-  if (memoFit.size > 5000) memoFit.clear();
+  const out = { w, h, e, ok: Math.abs(e.u1 - e.u0 - tw) < 0.5 && (th === null || Math.abs(e.v1 - e.v0 - th) < 0.5) };
+  if (memoFit.size > 6000) memoFit.clear();
   memoFit.set(key, out);
   return out;
 }
@@ -206,58 +286,24 @@ export function altoMinC(tw: number): number {
   const key = tw.toFixed(1);
   const hit = memoAlto.get(key);
   if (hit) return hit;
-  let lo = tw, hi = tw * 4;
-  for (let k = 0; k < 14; k++) {
+  let lo = tw * 0.8, hi = tw * 4;
+  for (let k = 0; k < 16; k++) {
     const mid = (lo + hi) / 2;
-    if (fitVoluta(tw, mid, 'C', false).ok) hi = mid; else lo = mid;
+    if (ajustar('C', tw, mid, false).ok) hi = mid; else lo = mid;
   }
   const r = Math.ceil(hi) + 1;
   memoAlto.set(key, r);
   return r;
 }
+/** Alto de una espiral cuya curva mide tw de ancho. */
+export const altoEspiral = (tw: number) => { const e = ajustar('espiral', tw, null, false).e; return e.v1 - e.v0; };
 
-/**
- * Coloca una voluta cuya curva real (no su caja) ocupa exactamente [x0,x1] × [y0,y1]:
- * así apoya justo en los barrotes o travesaños vecinos sin atravesarlos. Una C necesita
- * cierta altura para abarcar el hueco; si no la tiene, se hace en S (que siempre lo abarca).
- * Devuelve el id y los puntos de contacto en los lados pedidos.
- */
-export function volutaEn(
-  f: Forja, o: { x0: number; x1: number; y0: number; y1: number; zc: number; curve: 'C' | 'S'; mirror: boolean; lados: Lado[]; name?: string },
-): { id: string; contactos: Vec3[]; curve: 'C' | 'S' } {
-  const tw = o.x1 - o.x0, th = o.y1 - o.y0;
-  let fit = fitVoluta(tw, th, o.curve, o.mirror);
-  if (!fit.ok && o.curve === 'C') {
-    o = { ...o, curve: 'S', name: o.name?.replace(' en C', ' en S') };
-    fit = fitVoluta(tw, th, 'S', o.mirror);
-  }
-  const { w, h } = fit;
-  const e = fit.e;
-  const at: Vec3 = [o.x0 - e.u0, o.y0 - e.v0, o.zc - VB / 2];
-  const ew = e.u1 - e.u0, eh = e.v1 - e.v0;
-  let dev = 0;
-  for (let i = 1; i < e.pts.length; i++) dev += Math.hypot(e.pts[i][0] - e.pts[i - 1][0], e.pts[i][1] - e.pts[i - 1][1]);
-  const curvada = f.modo === 'curvada';
-  const nombre = o.name ?? `Voluta en ${o.curve}`;
-  const r = f.L(`vol|${o.curve}|${fx(ew)}|${fx(eh)}|${f.modo}`, nombre);
-  const id = f.b.voluta({
-    ref: r.ref, name: r.name, face: [w, h], normal: 'z', bar: VB, curve: o.curve, mirror: o.mirror, at,
-    stock: curvada ? 'Pletina de acero 12×6 mm' : `Voluta de forja en ${o.curve} de ${Math.round(eh)} × ${Math.round(ew)} mm, barra de ${VB} mm`,
-  });
-  const p = pieza(f.b, id);
-  if (curvada) {
-    p.stockKind = 'lineal';
-    p.cut = [Math.round(dev + 20), 12, 6];
-    p.note = `Voluta en ${o.curve} curvada en frío sobre plantilla: ${Math.round(eh)} × ${Math.round(ew)} mm terminada (desarrollo unos ${Math.round(dev)} mm, más 20 mm para recortar).`;
-  } else {
-    p.note = `Medida exterior de la voluta terminada: ${Math.round(eh)} mm de alto × ${Math.round(ew)} mm de ancho.`;
-  }
-  // contactos: muestras de la curva que llegan al borde pedido, agrupadas
-  const tol = Math.max(0.8, 0.012 * Math.max(ew, eh));
-  const contactos: Vec3[] = [];
-  for (const lado of o.lados) {
-    const sel = e.pts.filter(([u, v]) =>
-      lado === 'l' ? u - VB / 2 - e.u0 < tol : lado === 'r' ? e.u1 - (u + VB / 2) < tol : lado === 'b' ? v - VB / 2 - e.v0 < tol : e.v1 - (v + VB / 2) < tol);
+/** Puntos de la envolvente que tocan cada borde, agrupados (coordenadas de la caja). */
+function bordes(e: Env): Record<Lado, Pt[]> {
+  const tol = Math.max(0.8, 0.012 * Math.max(e.u1 - e.u0, e.v1 - e.v0));
+  const out = { l: [], r: [], t: [], b: [] } as Record<Lado, Pt[]>;
+  for (const lado of ['l', 'r', 't', 'b'] as Lado[]) {
+    const sel = e.off.filter(([u, v]) => (lado === 'l' ? u - e.u0 : lado === 'r' ? e.u1 - u : lado === 'b' ? v - e.v0 : e.v1 - v) < tol);
     const key = (q: Pt) => (lado === 'l' || lado === 'r' ? q[1] : q[0]);
     sel.sort((a, c) => key(a) - key(c));
     const grupos: Pt[][] = [];
@@ -267,24 +313,68 @@ export function volutaEn(
       else grupos.push([q]);
     }
     for (const g of grupos) {
-      const u = g.reduce((s, q) => s + q[0], 0) / g.length, v = g.reduce((s, q) => s + q[1], 0) / g.length;
-      const du = lado === 'l' ? -VB / 2 : lado === 'r' ? VB / 2 : 0, dv = lado === 'b' ? -VB / 2 : lado === 't' ? VB / 2 : 0;
-      contactos.push([r1(at[0] + u + du), r1(at[1] + v + dv), o.zc]);
+      const m = g.reduce((s, q) => s + key(q), 0) / g.length;
+      out[lado].push(lado === 'l' ? [e.u0, m] : lado === 'r' ? [e.u1, m] : lado === 'b' ? [m, e.v0] : [m, e.v1]);
     }
   }
-  return { id, contactos, curve: o.curve };
+  return out;
+}
+
+export interface Pieza { id: string; contactos: Vec3[]; bordes: Record<Lado, Vec3[]> }
+
+const NOMBRE_PIEZA: Record<Curva, string> = { C: 'Voluta en C', S: 'Voluta en S', espiral: 'Espiral', rombo: 'Rombo', corazon: 'Corazón' };
+
+/**
+ * Coloca un motivo de barra cuya curva real (no su caja) ocupa exactamente [x0,x1] × [y0,y1]:
+ * así apoya justo en los barrotes o travesaños vecinos sin atravesarlos. Devuelve el id, los
+ * puntos de contacto en los lados pedidos y todos los puntos de cada borde (para los frisos).
+ * Devuelve null si la curva no se puede ajustar a esa caja (una C demasiado baja, p. ej.).
+ */
+export function curvaEn(
+  f: Forja, o: { c: Curva; x0: number; x1: number; y0: number; y1: number; zc: number; mirror: boolean; lados: Lado[]; name?: string; libre?: boolean },
+): Pieza | null {
+  const tw = o.x1 - o.x0, th = o.y1 - o.y0;
+  const fit = ajustar(o.c, tw, o.libre ? null : th, o.mirror);
+  if (!fit.ok) return null;
+  const { w, h, e } = fit;
+  const at: Vec3 = [o.x0 - e.u0, o.y0 - e.v0, o.zc - VB / 2];
+  const ew = e.u1 - e.u0, eh = e.v1 - e.v0;
+  const dev = polyLength(e.pts);
+  const curvada = f.modo === 'curvada';
+  const base = NOMBRE_PIEZA[o.c];
+  const r = f.L(`${o.c}|${fx(ew)}|${fx(eh)}|${f.modo}`, o.name ? `${base} ${o.name}` : base);
+  const medida = `${Math.round(eh)} × ${Math.round(ew)} mm`;
+  const stock = curvada ? 'Pletina de acero 12×6 mm' : `${base} de forja de ${medida}, barra de ${VB} mm`;
+  const id = o.c === 'rombo'
+    ? f.b.rombo({ ref: r.ref, name: r.name, face: [w, h], normal: 'z', bar: VB, at, stock })
+    : o.c === 'corazon'
+      ? f.b.corazon({ ref: r.ref, name: r.name, face: [w, h], normal: 'z', bar: VB, at, stock })
+      : f.b.voluta({ ref: r.ref, name: r.name, face: [w, h], normal: 'z', bar: VB, curve: o.c, mirror: o.mirror, at, stock });
+  const p = pieza(f.b, id);
+  if (curvada) {
+    p.stockKind = 'lineal';
+    p.cut = [Math.round(dev + 20), 12, 6];
+    p.note = `${base} curvado en frío sobre plantilla: ${medida} terminado (desarrollo unos ${Math.round(dev)} mm, más 20 mm para recortar${o.c === 'rombo' ? '; se dobla en cuatro esquinas y se cierra con un punto' : ''}).`;
+  } else {
+    p.stockKind = 'unidad';
+    p.note = `Medida exterior terminada: ${Math.round(eh)} mm de alto × ${Math.round(ew)} mm de ancho.`;
+  }
+  const bs = bordes(e);
+  const w3 = (q: Pt): Vec3 => [r1(at[0] + q[0]), r1(at[1] + q[1]), o.zc];
+  const todos = { l: bs.l.map(w3), r: bs.r.map(w3), t: bs.t.map(w3), b: bs.b.map(w3) };
+  return { id, contactos: o.lados.flatMap((l) => todos[l]), bordes: todos };
 }
 
 /** Aro de diámetro exterior `d` centrado en (cx, cy); contactos en los lados pedidos. */
-export function aroEn(f: Forja, o: { cx: number; cy: number; d: number; zc: number; lados: Lado[]; name?: string }): { id: string; contactos: Vec3[] } {
+export function aroEn(f: Forja, o: { cx: number; cy: number; d: number; zc: number; lados: Lado[]; name?: string }): Pieza {
   const curvada = f.modo === 'curvada';
-  const r = f.L(`aro|${fx(o.d)}|${f.modo}`, o.name ?? 'Aro');
+  const r = f.L(`aro|${fx(o.d)}|${f.modo}`, o.name ? `Aro ${o.name}` : 'Aro');
   const id = f.b.aro({
     ref: r.ref, name: r.name, diameter: o.d, bar: VB, normal: 'z', at: [o.cx - o.d / 2, o.cy - o.d / 2, o.zc - VB / 2],
-    stock: curvada ? 'Pletina de acero 12×6 mm' : undefined,
+    stock: curvada ? 'Pletina de acero 12×6 mm' : `Aro de forja Ø${Math.round(o.d)} mm exterior, barra de ${VB} mm`,
   });
+  const p = pieza(f.b, id);
   if (curvada) {
-    const p = pieza(f.b, id);
     const dev = Math.PI * (o.d - VB);
     p.stockKind = 'lineal';
     p.cut = [Math.round(dev + 15), 12, 6];
@@ -294,9 +384,295 @@ export function aroEn(f: Forja, o: { cx: number; cy: number; d: number; zc: numb
   const c: Record<Lado, Vec3> = {
     l: [r1(o.cx - R), r1(o.cy), o.zc], r: [r1(o.cx + R), r1(o.cy), o.zc], t: [r1(o.cx), r1(o.cy + R), o.zc], b: [r1(o.cx), r1(o.cy - R), o.zc],
   };
-  return { id, contactos: o.lados.map((l) => c[l]) };
+  return { id, contactos: o.lados.map((l) => c[l]), bordes: { l: [c.l], r: [c.r], t: [c.t], b: [c.b] } };
 }
 
+const HOJA_T = 3; // grueso de la chapa de las hojas (decisión de diseño)
+/**
+ * Hoja de chapa con la base en (xb, yb) y la punta hacia arriba, inclinada `ang` radianes hacia +x
+ * (negativo: hacia −x). Su base se suelda al barrote (o al travesaño).
+ */
+export function hojaEn(f: Forja, o: { xb: number; yb: number; ang: number; L: number; zc: number }): { id: string; contacto: Vec3 } {
+  const L = Math.round(o.L), Wh = Math.round(o.L * 0.42);
+  const U = Math.max(...hojaPolygon(Wh, L).map((q) => q[0]));
+  const a = -o.ang; // giro alrededor de Z (positivo: antihorario)
+  const ox = Wh / 2 - U / 2, oy = -L / 2; // base respecto al centro de la caja
+  const cx = o.xb - (ox * Math.cos(a) - oy * Math.sin(a)), cy = o.yb - (ox * Math.sin(a) + oy * Math.cos(a));
+  const r = f.L(`hoja|${L}|${Wh}`, 'Hoja');
+  const id = f.b.hoja({
+    ref: r.ref, name: r.name, face: [Wh, L], normal: 'z', thickness: HOJA_T, at: [cx - U / 2, cy - L / 2, o.zc - HOJA_T / 2],
+    stock: `Hoja de forja de chapa de ${HOJA_T} mm, ${L} × ${Wh} mm`,
+  });
+  pieza(f.b, id).note = 'Se compra recortada y repujada; se suelda por la base con un punto por cada cara.';
+  if (Math.abs(o.ang) > 1e-6) f.b.rotate(id, [0, 0, a]);
+  return { id, contacto: [r1(o.xb), r1(o.yb), o.zc] };
+}
+
+/** Huecos libres entre los obstáculos (caras de montante y barrotes; aristas si el barrote va retorcido). */
+export function huecos(xa: number, xb: number, xs: number[], d: number, tw: boolean[] = []): [number, number][] {
+  const k = sobreRetorcido(d);
+  const edges = [xa, ...xs.flatMap((x, i) => (tw[i] ? [x - k, x + d + k] : [x, x + d])), xb];
+  const out: [number, number][] = [];
+  for (let i = 0; i < edges.length; i += 2) out.push([edges[i], edges[i + 1]]);
+  return out;
+}
+
+export interface Deco { ids: string[]; contactos: Vec3[]; cuenta: Partial<Record<Motivo, number>>; avisos: string[]; alto: number }
+const decoVacia = (): Deco => ({ ids: [], contactos: [], cuenta: {}, avisos: [], alto: 0 });
+const anota = (d: Deco, m: Motivo) => { d.cuenta[m] = (d.cuenta[m] ?? 0) + 1; };
+
+/** Índice del patrón y sentido de cada posición de una fila de n, con o sin simetría. */
+function secuencia(patron: Motivo[], n: number, simetria: boolean, invertir = false) {
+  const c = (n - 1) / 2;
+  return Array.from({ length: n }, (_, i) => {
+    const j = invertir ? n - 1 - i : i;
+    let k = j, mirror = false;
+    if (simetria && j > c) { k = n - 1 - j; mirror = true; }
+    if (invertir) mirror = !mirror;
+    return { m: patron[k % patron.length], mirror, centro: simetria && j === c };
+  });
+}
+
+/**
+ * Decora los huecos entre barrotes de un paño: repite el patrón cíclicamente hueco a hueco.
+ * Cada motivo se ajusta al hueco libre real y apoya en los dos barrotes y en el travesaño
+ * (`anchor`: arriba, colgando del travesaño superior; abajo, sobre el inferior). Lo que no
+ * cabe se sustituye (C → S) o se omite, y se avisa en `avisos`.
+ * `hvAt` permite limitar la altura hueco a hueco (bajo un arco).
+ */
+export function filaMotivos(f: Forja, o: {
+  xa: number; xb: number; xs: number[]; d: number; tw?: boolean[]; yRail: number; anchor: 'top' | 'bottom'; hv: number; zc: number;
+  patron: Motivo[]; simetria: boolean; invertir?: boolean; zona: string; hvAt?: (g0: number, g1: number) => number;
+}): Deco {
+  const out = decoVacia();
+  if (!patronActivo(o.patron)) return out;
+  const gaps = huecos(o.xa, o.xb, o.xs, o.d, o.tw);
+  const seq = secuencia(o.patron, gaps.length, o.simetria, o.invertir);
+  const rail: Lado = o.anchor === 'top' ? 't' : 'b';
+  const add = (p: Pieza | null, m: Motivo, alto: number) => {
+    if (!p) return false;
+    out.ids.push(p.id); out.contactos.push(...p.contactos); anota(out, m); out.alto = Math.max(out.alto, alto);
+    return true;
+  };
+  gaps.forEach(([g0, g1], i) => {
+    let { m } = seq[i];
+    const { mirror, centro } = seq[i];
+    if (m === 'vacio') return;
+    if (centro && CON_MANO.has(m)) {
+      out.avisos.push(`${o.zona}: el hueco central lleva un aro en lugar de ${unNombre(m)}, para que el dibujo quede simétrico.`);
+      m = 'aro';
+    }
+    const g = g1 - g0;
+    const hv = Math.min(o.hv, o.hvAt ? o.hvAt(g0, g1) : Infinity);
+    const y = (h: number) => (o.anchor === 'top' ? [o.yRail - h, o.yRail] : [o.yRail, o.yRail + h]);
+    const poner = (mm_: Motivo): boolean => {
+      if (mm_ === 'C') {
+        const need = altoMinC(g);
+        if (hv < need) return false;
+        const h = Math.min(hv, need + 6);
+        const [y0, y1] = y(h);
+        return add(curvaEn(f, { c: 'C', x0: g0, x1: g1, y0, y1, zc: o.zc, mirror, lados: ['l', 'r', rail] }), 'C', h);
+      }
+      if (mm_ === 'S') {
+        if (hv < g * 0.8) return false;
+        const h = Math.min(hv, g * 1.9);
+        const [y0, y1] = y(h);
+        return add(curvaEn(f, { c: 'S', x0: g0, x1: g1, y0, y1, zc: o.zc, mirror, lados: ['l', 'r', rail] }), 'S', h);
+      }
+      if (mm_ === 'espiral') {
+        const h = altoEspiral(g);
+        if (hv < h) return false;
+        const [y0, y1] = y(h);
+        return add(curvaEn(f, { c: 'espiral', x0: g0, x1: g1, y0, y1, zc: o.zc, mirror, lados: ['l', 'r', rail], libre: true }), 'espiral', h);
+      }
+      if (mm_ === 'aro') {
+        if (hv < g) return false;
+        const cy = o.anchor === 'top' ? o.yRail - g / 2 : o.yRail + g / 2;
+        return add(aroEn(f, { cx: (g0 + g1) / 2, cy, d: g, zc: o.zc, lados: ['l', 'r', rail] }), 'aro', g);
+      }
+      if (mm_ === 'rombo') {
+        if (hv < g * 1.15) return false;
+        const h = Math.min(hv, g * 1.6);
+        const [y0, y1] = y(h);
+        return add(curvaEn(f, { c: 'rombo', x0: g0, x1: g1, y0, y1, zc: o.zc, mirror: false, lados: ['l', 'r', rail] }), 'rombo', h);
+      }
+      if (mm_ === 'corazon') {
+        if (hv < g * 0.85) return false;
+        const h = Math.min(hv, g * 1.05);
+        const [y0, y1] = y(h);
+        return add(curvaEn(f, { c: 'corazon', x0: g0, x1: g1, y0, y1, zc: o.zc, mirror: false, lados: ['l', 'r', rail] }), 'corazon', h);
+      }
+      if (mm_ === 'hoja') {
+        // pareja de hojas en V que nacen de los dos barrotes y se abren hacia el centro del hueco
+        const need = g * 0.85;
+        if (hv < need) return false;
+        const ang = Math.PI / 4, L = (g * 0.46) / Math.sin(ang);
+        const yb = o.anchor === 'top' ? o.yRail - need : o.yRail + g * 0.22;
+        for (const [xb, s] of [[g0 - 1, 1], [g1 + 1, -1]] as const) {
+          const hj = hojaEn(f, { xb, yb, ang: s * ang, L, zc: o.zc });
+          out.ids.push(hj.id); out.contactos.push(hj.contacto); anota(out, 'hoja');
+        }
+        out.alto = Math.max(out.alto, need);
+        return true;
+      }
+      return false;
+    };
+    if (poner(m)) return;
+    if ((m === 'C' || m === 'espiral') && poner('S')) {
+      out.avisos.push(`${o.zona}: algún hueco es demasiado bajo para ${unNombre(m)}; se ha puesto una voluta en S, que cabe en menos altura.`);
+      return;
+    }
+    out.avisos.push(`${o.zona}: no cabe ${unNombre(m)} en un hueco de ${Math.round(g)} mm de ancho con ${Math.round(Math.max(0, hv))} mm de alto libre; ese hueco se queda sin adorno.`);
+  });
+  out.avisos = [...new Set(out.avisos)];
+  return out;
+}
+
+// ---------- frisos ----------
+/** Ancho de cada motivo en un friso de alto h (toca los dos travesaños). */
+const memoAnchoC = new Map<string, number>();
+function anchoC(h: number): number {
+  const key = h.toFixed(1);
+  const hit = memoAnchoC.get(key);
+  if (hit) return hit;
+  let lo = VB * 2, hi = h;
+  for (let k = 0; k < 16; k++) {
+    const mid = (lo + hi) / 2;
+    if (altoMinC(mid) + 4 <= h) lo = mid; else hi = mid;
+  }
+  memoAnchoC.set(key, lo);
+  return lo;
+}
+let ratioEspiral = 0;
+function anchoFriso(m: Motivo, h: number): number {
+  switch (m) {
+    case 'aro': return h;
+    case 'rombo': return h * 0.62;
+    case 'corazon': return h * 0.95;
+    case 'S': return h * 0.55;
+    case 'C': return anchoC(h);
+    case 'espiral': {
+      if (!ratioEspiral) { const e = ajustar('espiral', 100, null, false).e; ratioEspiral = (e.u1 - e.u0) / (e.v1 - e.v0); }
+      return h * ratioEspiral;
+    }
+    case 'hoja': return h * 0.5;
+    default: return h * 0.5; // hueco libre
+  }
+}
+
+/** Nº de motivos de barra (los que se curvan); las hojas se compran siempre hechas. */
+export const motivosBarra = (c: Partial<Record<Motivo, number>>) => totalMotivos(c) - (c.hoja ?? 0) - (c.vacio ?? 0);
+
+/** Líneas del paso «Curva…» con lo que hay que fabricar de cada tipo. */
+export function lineasCurvar(c: Partial<Record<Motivo, number>>): string[] {
+  const vol = (c.C ?? 0) + (c.S ?? 0) + (c.espiral ?? 0) + (c.corazon ?? 0);
+  const sinHojas = { ...c, hoja: 0, rombo: 0, aro: 0 };
+  return [
+    ...(vol ? [`${resumenMotivos(sinHojas).replace(/^./, (x) => x.toUpperCase())}: dibuja a tamaño real cada tipo con la medida exterior de la lista de piezas y fabrica su plantilla. Los corazones son dos volutas enfrentadas: curva primero los ojos y cierra la punta al final.`] : []),
+    ...(c.rombo ? [`Rombos: ${c.rombo}. Marca las cuatro esquinas sobre la pletina repartiendo el desarrollo de la lista de piezas, dóblala en el tornillo de banco con la escuadra y cierra el rombo con un punto.`] : []),
+    ...(c.aro ? [`Aros: ${c.aro}. Curva un muelle largo de pletina alrededor de un tubo que haga de mandril, corta los aros uno a uno y ciérralos con un punto.`] : []),
+    ...(c.hoja ? [`Las ${c.hoja} hojas no se curvan: se compran recortadas y repujadas.`] : []),
+  ];
+}
+
+/** Líneas del paso de montaje de la decoración. */
+export function lineasMontaje(o: { g: number; simetria: boolean; panos: Partial<Record<Motivo, number>>; friso?: Partial<Record<Motivo, number>>; frisoH?: number }): string[] {
+  const nP = totalMotivos(o.panos), nF = o.friso ? totalMotivos(o.friso) : 0;
+  return [
+    ...(nP ? [`Entre barrotes: ${resumenMotivos(o.panos)}. Cada pieza ocupa un hueco de unos ${mm(o.g)} y apoya en los dos barrotes y en el travesaño${o.panos.hoja ? '; las hojas se sueldan por la base, una a cada barrote, abiertas en V hacia el centro del hueco' : ''}.`] : []),
+    ...(nP && o.simetria ? ['La mitad derecha es el reflejo de la izquierda: las volutas y espirales de ese lado se colocan dadas la vuelta. Presenta primero el hueco central y ve hacia los lados por parejas.'] : []),
+    ...(nF ? [`Friso de ${mm(o.frisoH ?? 0)} de alto: ${resumenMotivos(o.friso!)}. Cada motivo toca los dos travesaños del friso; empieza por el centro y ve hacia los montantes.`] : []),
+  ];
+}
+
+export interface PlanFriso { h: number; sep: number; items: { m: Motivo; w: number; mirror: boolean }[]; avisos: string[] }
+
+/** Secuencia del friso: con simetría se refleja; las C o S seguidas se alternan (espalda con espalda). */
+function secuenciaFriso(patron: Motivo[], n: number, simetria: boolean) {
+  const seq = secuencia(patron, n, simetria).map((s) => ({ ...s, m: s.centro && CON_MANO.has(s.m) ? ('aro' as Motivo) : s.m }));
+  const mitad = simetria ? Math.ceil(n / 2) : n;
+  for (let i = 0; i < mitad; i++) {
+    const prev = i > 0 ? seq[i - 1] : null;
+    seq[i].mirror = CON_MANO.has(seq[i].m) && !!prev && prev.m === seq[i].m && !prev.mirror;
+  }
+  if (simetria) for (let i = mitad; i < n; i++) seq[i].mirror = !seq[n - 1 - i].mirror;
+  return seq;
+}
+
+/**
+ * Reparte el patrón a lo largo de un friso de luz `span`: cada motivo toca los dos travesaños y
+ * a sus vecinos. Se elige el nº de motivos cuyo alto de friso queda más cerca de `objetivo`.
+ */
+export function planFriso(span: number, objetivo: number, patron: Motivo[], simetria: boolean): PlanFriso | null {
+  if (!patronActivo(patron)) return null;
+  const avisos: string[] = [];
+  const ratios = new Map<Motivo, number>();
+  const ratio = (m: Motivo) => { if (!ratios.has(m)) ratios.set(m, anchoFriso(m, objetivo) / objetivo); return ratios.get(m)!; };
+  let best: { n: number; h: number } | null = null;
+  for (let n = 2; n <= 60; n++) {
+    const seq = secuenciaFriso(patron, n, simetria);
+    if (!seq.some((s) => s.m !== 'vacio')) continue;
+    const h = span / seq.reduce((s, it) => s + ratio(it.m), 0);
+    if (h < 60) break;
+    if (!best || Math.abs(h - objetivo) < Math.abs(best.h - objetivo)) best = { n, h };
+  }
+  if (!best) return null;
+  const seq = secuenciaFriso(patron, best.n, simetria);
+  const total = (h: number) => seq.reduce((s, it) => s + anchoFriso(it.m, h), 0);
+  let lo = best.h * 0.7, hi = best.h * 1.3;
+  for (let k = 0; k < 30; k++) { const mid = (lo + hi) / 2; if (total(mid) <= span) lo = mid; else hi = mid; }
+  const h = Math.floor(lo * 10) / 10;
+  const items = seq.map((s) => ({ m: s.m, w: anchoFriso(s.m, h), mirror: s.mirror }));
+  const sep = Math.max(0, (span - items.reduce((s, it) => s + it.w, 0)) / (items.length + 1));
+  if (simetria && best.n % 2 === 1 && CON_MANO.has(secuencia(patron, best.n, true)[(best.n - 1) / 2].m)) {
+    avisos.push('Friso: el motivo central es un aro, para que el dibujo quede simétrico.');
+  }
+  return { h, sep, items, avisos };
+}
+
+/** Coloca los motivos de un friso ya planificado entre xa y el travesaño en y0. */
+export function frisoMotivos(f: Forja, plan: PlanFriso, o: { xa: number; y0: number; zc: number }): Deco {
+  const out = decoVacia();
+  out.avisos = [...plan.avisos];
+  out.alto = plan.h;
+  const { h } = plan;
+  const y0 = o.y0, y1 = o.y0 + h;
+  const piezas: (Pieza | null)[] = [];
+  let x = o.xa + plan.sep;
+  for (const it of plan.items) {
+    const x0 = x, x1 = x + it.w;
+    x = x1 + plan.sep;
+    let p: Pieza | null = null;
+    if (it.m === 'aro') p = aroEn(f, { cx: (x0 + x1) / 2, cy: y0 + h / 2, d: h, zc: o.zc, lados: ['t', 'b'], name: 'del friso' });
+    else if (it.m === 'hoja') {
+      const hj = hojaEn(f, { xb: (x0 + x1) / 2, yb: y0 - 1, ang: 0, L: h + 2, zc: o.zc });
+      out.ids.push(hj.id); out.contactos.push(hj.contacto, [hj.contacto[0], r1(y1), o.zc]); anota(out, 'hoja');
+    } else if (it.m !== 'vacio') {
+      p = curvaEn(f, { c: it.m, x0, x1, y0, y1, zc: o.zc, mirror: it.mirror, lados: ['t', 'b'], name: 'del friso' });
+      if (!p && it.m === 'C') p = curvaEn(f, { c: 'S', x0, x1, y0, y1, zc: o.zc, mirror: it.mirror, lados: ['t', 'b'], name: 'del friso' });
+    }
+    if (p) { out.ids.push(p.id); out.contactos.push(...p.contactos); anota(out, it.m); }
+    piezas.push(p);
+  }
+  // contactos laterales: con el montante en los extremos y entre vecinos que se tocan a la misma altura
+  const near = (a: Vec3, b: Vec3) => Math.abs(a[0] - b[0]) < 1.5 && Math.abs(a[1] - b[1]) < VB;
+  if (plan.sep < 1) {
+    const [a, z] = [piezas[0], piezas[piezas.length - 1]];
+    if (a) out.contactos.push(...a.bordes.l);
+    if (z) out.contactos.push(...z.bordes.r);
+  }
+  for (let i = 1; i < piezas.length; i++) {
+    const [a, b] = [piezas[i - 1], piezas[i]];
+    if (!a || !b) continue;
+    for (const p of a.bordes.r) {
+      const q = b.bordes.l.find((c) => near(p, c));
+      if (q) out.contactos.push([r1((p[0] + q[0]) / 2), r1((p[1] + q[1]) / 2), o.zc]);
+    }
+  }
+  return out;
+}
+
+// ---------- remates ----------
 /** Punta de lanza o pincho centrada sobre un barrote de grueso d cuya cara superior está en `ytop`. */
 export function puntaSobre(f: Forja, tipo: Exclude<Remate, 'ninguno'>, d: number, xc: number, ytop: number, zc: number): string {
   const base = tipo === 'lanza' ? Math.max(24, d * 2) : d;
@@ -313,72 +689,6 @@ export function bolaSobre(f: Forja, d: number, xc: number, ytop: number, zc: num
   const r = f.L(`bola|${d}|${name}`, name);
   const yc = ytop + d / 2 - d * 0.12;
   return f.b.bola({ ref: r.ref, name: r.name, diameter: d, at: [xc - d / 2, yc - d / 2, zc - d / 2], stock });
-}
-
-// ---------- filas de decoración ----------
-/**
- * Volutas en cada hueco de una fila de barrotes, apoyadas en el travesaño (arriba o abajo).
- * Mitad izquierda y derecha simétricas; el hueco central (si lo hay) lleva un aro.
- */
-export function filaVolutas(
-  f: Forja, o: { xa: number; xb: number; xs: number[]; d: number; yRail: number; anchor: 'top' | 'bottom'; hv: number; tipo: 'C' | 'S'; zc: number },
-): { ids: string[]; contactos: Vec3[]; nVol: number; nAro: number } {
-  const ids: string[] = [];
-  const contactos: Vec3[] = [];
-  let nVol = 0, nAro = 0;
-  const mid = (o.xa + o.xb) / 2;
-  for (const [g0, g1] of huecos(o.xa, o.xb, o.xs, o.d)) {
-    const gc = (g0 + g1) / 2, g = g1 - g0;
-    const hv = Math.min(o.hv, o.tipo === 'C' ? altoMinC(g) + 6 : g * 1.9);
-    const yA = o.anchor === 'top' ? o.yRail - hv : o.yRail;
-    const yB = o.anchor === 'top' ? o.yRail : o.yRail + hv;
-    if (Math.abs(gc - mid) < 1) {
-      const cy = o.anchor === 'top' ? o.yRail - g / 2 : o.yRail + g / 2;
-      const a = aroEn(f, { cx: gc, cy, d: g, zc: o.zc, lados: ['l', 'r', o.anchor === 'top' ? 't' : 'b'], name: 'Aro central' });
-      ids.push(a.id); contactos.push(...a.contactos); nAro++;
-      continue;
-    }
-    const izquierda = gc < mid;
-    const v = volutaEn(f, {
-      x0: g0, x1: g1, y0: yA, y1: yB, zc: o.zc, curve: o.tipo, mirror: !izquierda,
-      lados: ['l', 'r', o.anchor === 'top' ? 't' : 'b'],
-    });
-    ids.push(v.id); contactos.push(...v.contactos); nVol++;
-  }
-  return { ids, contactos, nVol, nAro };
-}
-
-/** Nº y diámetro de los aros de un friso de luz `span` (se tocan entre sí y con los travesaños). */
-export function medidaFrisoAros(span: number, objetivo: number) {
-  const n = Math.max(2, Math.round(span / objetivo));
-  return { n, d: span / n, alto: span / n };
-}
-/** Nº de parejas de volutas en C espalda con espalda y alto del friso. */
-export function medidaFrisoVolutas(span: number, objetivo: number) {
-  const n = Math.max(1, Math.round(span / (2 * objetivo)));
-  const cw = span / (2 * n);
-  return { n, cw, alto: altoMinC(cw) + 4 };
-}
-
-export function frisoAros(f: Forja, o: { xa: number; xb: number; y0: number; n: number; zc: number }) {
-  const d = (o.xb - o.xa) / o.n;
-  const ids: string[] = [], contactos: Vec3[] = [];
-  for (let i = 0; i < o.n; i++) {
-    const a = aroEn(f, { cx: o.xa + d * (i + 0.5), cy: o.y0 + d / 2, d, zc: o.zc, lados: i === 0 ? ['l', 'r', 't', 'b'] : ['r', 't', 'b'], name: 'Aro del friso' });
-    ids.push(a.id); contactos.push(...a.contactos);
-  }
-  return { ids, contactos, d };
-}
-
-export function frisoVolutas(f: Forja, o: { xa: number; xb: number; y0: number; y1: number; n: number; zc: number }) {
-  const cw = (o.xb - o.xa) / (2 * o.n);
-  const ids: string[] = [], contactos: Vec3[] = [];
-  for (let i = 0; i < o.n * 2; i++) {
-    const x0 = o.xa + cw * i;
-    const v = volutaEn(f, { x0, x1: x0 + cw, y0: o.y0, y1: o.y1, zc: o.zc, curve: 'C', mirror: i % 2 === 1, lados: ['l', 'r', 't', 'b'], name: 'Voluta del friso' });
-    ids.push(v.id); contactos.push(...v.contactos);
-  }
-  return { ids, contactos };
 }
 
 // ---------- marcas ----------
@@ -529,30 +839,6 @@ export const puertaVerja: Generator = {
     { key: 'travesano', label: 'Altura del travesaño intermedio', type: 'number', min: 250, max: 900, step: 10, unit: 'mm', default: 420, group: 'Forma', help: 'Desde abajo de la hoja hasta su cara inferior. Se ajusta solo si no cabe.' },
     { key: 'zocalo', label: 'Zócalo de chapa', type: 'boolean', default: false, group: 'Forma', help: 'Chapa lisa entre el travesaño inferior y el intermedio en lugar de barrotes.' },
     { key: 'remate', label: 'Puntas', type: 'select', default: 'ninguno', group: 'Detalles', options: OPC_REMATE, help: 'Centradas sobre cada barrote.' },
-    {
-      key: 'volutas', label: 'Volutas entre barrotes', type: 'select', default: 'no', group: 'Detalles',
-      options: [
-        { value: 'no', label: 'Sin volutas' },
-        { value: 'arriba', label: 'Bajo el travesaño superior' },
-        { value: 'abajo', label: 'En la parte baja' },
-        { value: 'ambas', label: 'Arriba y abajo' },
-      ],
-    },
-    {
-      key: 'tipoVoluta', label: 'Tipo de voluta', type: 'select', default: 'C', group: 'Detalles', visible: (v) => v.volutas !== 'no',
-      options: [
-        { value: 'C', label: 'En C', hint: 'Simétricas a cada lado del centro' },
-        { value: 'S', label: 'En S', hint: 'Más movidas' },
-      ],
-    },
-    {
-      key: 'friso', label: 'Friso decorativo', type: 'select', default: 'no', group: 'Detalles', help: 'Banda sobre el travesaño intermedio, cerrada por otro travesaño.',
-      options: [
-        { value: 'no', label: 'Sin friso' },
-        { value: 'aros', label: 'Friso de aros' },
-        { value: 'volutas', label: 'Friso de volutas', hint: 'Parejas de C espalda con espalda' },
-      ],
-    },
     { key: 'bolas', label: 'Bolas en los montantes', type: 'boolean', default: false, group: 'Detalles' },
     {
       key: 'cierre', label: 'Cierre', type: 'select', default: 'pasador', group: 'Detalles',
@@ -587,6 +873,7 @@ export const puertaVerja: Generator = {
       ],
     },
     { key: 'barrote', label: 'Barrotes', type: 'select', default: 'cuad12', group: 'Material', options: OPC_BARROTE },
+    paramTipoBarrote(),
     {
       key: 'poste', label: 'Tubo de los postes', type: 'select', default: '60', group: 'Material', visible: (v) => v.postes === true,
       options: [
@@ -594,22 +881,31 @@ export const puertaVerja: Generator = {
         { value: '80', label: '80 × 80 × 2 mm', hint: 'Para hojas grandes o pesadas' },
       ],
     },
+    paramPatron('patSup', 'Paño superior', '', 'Motivos entre barrotes, colgados del travesaño superior. Se repiten en orden hueco a hueco.'),
+    paramPatron('patInf', 'Paño inferior', '', 'Motivos entre los barrotes de abajo, sobre el travesaño inferior (con zócalo, en la parte baja del paño de arriba).'),
+    paramPatron('patFriso', 'Friso', '', 'Banda de motivos sobre el travesaño intermedio, cerrada por otro travesaño. Vacío: sin friso.'),
+    paramSimetria(),
     paramAcabado('negro'),
     PARAM_FORJA,
     PARAM_PROCESO,
   ],
+  dragAxes: { x: 'ancho', y: 'alto' },
   presets: [
     {
       id: 'lisa', name: 'Cancela lisa', blurb: 'Una hoja de 90 × 120 cm, barrotes rectos y zócalo de chapa. Sin adornos: aprende a escuadrar y colgar.',
-      values: { ancho: 900, alto: 1200, hueco: 110, forma: 'recto', hojas: '1', travesano: 400, zocalo: true, remate: 'ninguno', volutas: 'no', friso: 'no', bolas: false, cierre: 'pasador', batiente: true, postes: true, anclaje: 'placa', remPoste: 'tapa', marco: '40', barrote: 'cuad12', poste: '60', acabado: 'antracita', forja: 'comprada', proceso: 'electrodo' },
+      values: { ancho: 900, alto: 1200, hueco: 110, forma: 'recto', hojas: '1', travesano: 400, zocalo: true, remate: 'ninguno', patSup: '', patInf: '', patFriso: '', simetria: true, bolas: false, cierre: 'pasador', batiente: true, postes: true, anclaje: 'placa', remPoste: 'tapa', marco: '40', barrote: 'cuad12', poste: '60', acabado: 'antracita', forja: 'comprada', proceso: 'electrodo' },
     },
     {
       id: 'lanzas', name: 'Puerta de lanzas', blurb: '100 × 150 cm con barrotes pasantes rematados en lanza, friso de aros y bolas en los montantes.',
-      values: { ancho: 1000, alto: 1500, hueco: 110, forma: 'lanza', sobresale: 150, hojas: '1', travesano: 380, zocalo: false, remate: 'lanza', volutas: 'no', friso: 'aros', bolas: true, cierre: 'pasador', batiente: true, postes: true, anclaje: 'placa', remPoste: 'bola', marco: '40g', barrote: 'cuad16', poste: '60', acabado: 'verde', forja: 'comprada', proceso: 'electrodo' },
+      values: { ancho: 1000, alto: 1500, hueco: 110, forma: 'lanza', sobresale: 150, hojas: '1', travesano: 380, zocalo: false, remate: 'lanza', patSup: '', patInf: '', patFriso: 'aro', simetria: true, bolas: true, cierre: 'pasador', batiente: true, postes: true, anclaje: 'placa', remPoste: 'bola', marco: '40g', barrote: 'cuad16', poste: '60', acabado: 'verde', forja: 'comprada', proceso: 'electrodo' },
     },
     {
       id: 'forja', name: 'Puerta de forja con volutas', blurb: 'En arco, con lanzas sobre el arco, volutas en C arriba y abajo, friso de volutas y bolas: la más ornamentada.',
-      values: { ancho: 1000, alto: 1900, hueco: 105, forma: 'arco', flecha: 260, sobresale: 130, hojas: '1', travesano: 520, zocalo: false, remate: 'lanza', volutas: 'ambas', tipoVoluta: 'C', friso: 'volutas', bolas: true, cierre: 'cerradura', batiente: true, postes: true, anclaje: 'placa', remPoste: 'bola', marco: '40g', barrote: 'cuad12', poste: '80', acabado: 'negro', forja: 'comprada', proceso: 'electrodo' },
+      values: { ancho: 1000, alto: 1900, hueco: 105, forma: 'arco', flecha: 260, sobresale: 130, hojas: '1', travesano: 520, zocalo: false, remate: 'lanza', patSup: 'C', patInf: 'C', patFriso: 'C', simetria: true, bolas: true, cierre: 'cerradura', batiente: true, postes: true, anclaje: 'placa', remPoste: 'bola', marco: '40g', barrote: 'cuad12', poste: '80', acabado: 'negro', forja: 'comprada', proceso: 'electrodo' },
+    },
+    {
+      id: 'corazones', name: 'Puerta de corazones y rombos', blurb: 'Barrotes alternos lisos y retorcidos, corazones bajo el travesaño, friso de rombos y aros, hojas abajo y pinchos.',
+      values: { ancho: 1000, alto: 1600, hueco: 110, forma: 'recto', hojas: '1', travesano: 450, zocalo: false, remate: 'pincho', patSup: 'corazon,vacio', patInf: 'hoja', patFriso: 'rombo,aro', simetria: true, bolas: true, cierre: 'pasador', batiente: true, postes: true, anclaje: 'placa', remPoste: 'bola', marco: '40g', barrote: 'cuad12', tipoBarrote: 'alterno', poste: '60', acabado: 'negro', forja: 'comprada', proceso: 'electrodo' },
     },
   ],
   build: buildPuerta,
@@ -620,7 +916,8 @@ interface Hoja {
   remates: string[]; bolas: string[];
   jMarco: J[]; jBarras: J[]; jBajoArco: J[]; jRemate: J[];
   pChapa: Mark[]; cChapa: Mark[]; decoC: Vec3[]; arcoC: Vec3[]; puntasC: Mark[]; bolaC: Mark[];
-  nBar: number; g: number; nVol: number; nAro: number; nFriso: number; nPuntas: number;
+  nBar: number; g: number; nRet: number; nPuntas: number;
+  cuenta: Partial<Record<Motivo, number>>; cuentaFriso: Partial<Record<Motivo, number>>; avisos: string[];
   hingeLeft: boolean;
   hingeX: number; closeX: number; // cara exterior del montante de bisagras / de cierre
   stileTop: number; cierreStile: [number, number]; // [x mín, x máx] del montante de cierre
@@ -633,9 +930,8 @@ function buildPuerta(v: ParamValues) {
   const dos = v.hojas === '2';
   const zocalo = v.zocalo === true;
   const remate = String(v.remate) as Remate;
-  const volSel = String(v.volutas);
-  const tipoVol = v.tipoVoluta === 'S' ? 'S' : 'C';
-  let frisoSel = String(v.friso);
+  const patSup = leerPatron(v.patSup), patInf = leerPatron(v.patInf), patFriso = leerPatron(v.patFriso);
+  const simetria = v.simetria !== false;
   const bolas = v.bolas === true;
   const cierre = String(v.cierre);
   const batiente = v.batiente === true;
@@ -665,24 +961,25 @@ function buildPuerta(v: ParamValues) {
   const yRailTop = forma === 'arco' ? y0 + H - rise - ARC_A : y0 + H; // cara superior del travesaño superior
   const yTB = yRailTop - s; // cara inferior del travesaño superior
   const stileTop = forma === 'arco' ? yRailTop + Math.max(ARC_A + 30, Math.round(rise * 0.5)) : y0 + H;
-  const fA = medidaFrisoAros(span, Math.max(90, Math.min(150, hmax * 1.05)));
-  const fV = medidaFrisoVolutas(span, 62);
-  let hbF = frisoSel === 'aros' ? fA.alto : frisoSel === 'volutas' ? fV.alto : 0;
+  let plan = planFriso(span, Math.max(90, Math.min(150, hmax * 1.05)), patFriso, simetria);
+  let hbF = plan ? plan.h : 0;
   const upperMin = 180;
   const ymMin = y0 + s + 150;
   let ymMax = yTB - upperMin - (hbF ? hbF + s : 0) - s;
   let notaFriso = '';
-  if (hbF && ymMax < ymMin) {
+  if (plan && ymMax < ymMin) {
     notaFriso = 'Con esta altura no cabe el friso: se ha quitado. Sube el alto de la hoja o baja la flecha del arco para recuperarlo.';
-    frisoSel = 'no'; hbF = 0; ymMax = yTB - upperMin - s;
+    plan = null; hbF = 0; ymMax = yTB - upperMin - s;
+  } else if (patronActivo(patFriso) && !plan) {
+    notaFriso = 'El patrón del friso no deja sitio a ningún motivo con este ancho: se ha quitado el friso.';
   }
   const ym = Math.max(ymMin, Math.min(y0 + Number(v.travesano), ymMax)); // cara inferior del travesaño intermedio
-  const friso = frisoSel !== 'no';
+  const friso = plan !== null;
   const yF = ym + s; // arranque del friso
   const upperBot = friso ? yF + hbF + s : ym + s;
   const lowerH = ym - (y0 + s), upperH = yTB - upperBot;
-  const volArriba = volSel === 'arriba' || volSel === 'ambas';
-  const volAbajo = volSel === 'abajo' || volSel === 'ambas';
+  const decoArriba = patronActivo(patSup);
+  const decoAbajo = patronActivo(patInf);
 
   const hojas: Hoja[] = [];
   const mkHoja = (xL: number, hingeLeft: boolean): Hoja => {
@@ -690,7 +987,7 @@ function buildPuerta(v: ParamValues) {
     const h: Hoja = {
       montantes: [], travesanos: [], chapa: [], barras: [], deco: [], arco: [], bajoArco: [], remates: [], bolas: [],
       jMarco: [], jBarras: [], jBajoArco: [], jRemate: [], pChapa: [], cChapa: [], decoC: [], arcoC: [], puntasC: [], bolaC: [],
-      nBar: 0, g: 0, nVol: 0, nAro: 0, nFriso: 0, nPuntas: 0, hingeLeft,
+      nBar: 0, g: 0, nRet: 0, nPuntas: 0, cuenta: {}, cuentaFriso: {}, avisos: [], hingeLeft,
       hingeX: hingeLeft ? xL : xL + W, closeX: hingeLeft ? xL + W : xL, stileTop,
       cierreStile: hingeLeft ? [xL + W - s, xL + W] : [xL, xL + s], ym, yTB, rise, friso,
     };
@@ -706,13 +1003,17 @@ function buildPuerta(v: ParamValues) {
     // barrotes
     const { xs, g } = reparto(xa, xb, d, hmax);
     h.nBar = xs.length; h.g = g;
+    const ret = barrotesRetorcidos(String(v.tipoBarrote), sp, xs.length);
+    if (ret.aviso) h.avisos.push(ret.aviso);
+    const tw = ret.tw;
     const regiones: [number, number][] = [[upperBot, yTB]];
     if (!zocalo) regiones.unshift([y0 + s, ym]);
     for (const [ya, yb] of regiones) {
-      for (const x of xs) {
-        const id = barrote(f, sp, ya < ym ? 'Barrote inferior' : 'Barrote', yb - ya, x, ya, zc);
+      xs.forEach((x, i) => {
+        const id = barrote(f, sp, ya < ym ? 'Barrote inferior' : 'Barrote', yb - ya, x, ya, zc, tw[i]);
         h.barras.push(id); h.jBarras.push([id, 'min'], [id, 'max']);
-      }
+        if (tw[i]) h.nRet++;
+      });
     }
     if (zocalo) {
       const r = f.L(`chapa|${fx(span)}|${fx(lowerH)}`, 'Chapa del zócalo');
@@ -724,25 +1025,21 @@ function buildPuerta(v: ParamValues) {
       h.pChapa.push(punto([xa + 15, y0 + s, zf]), punto([xb - 15, y0 + s, zf]), punto([xa + 15, ym, zf]), punto([xb - 15, ym, zf]), punto([xa, (y0 + s + ym) / 2, zf]), punto([xb, (y0 + s + ym) / 2, zf]));
       h.cChapa.push(...cosido([xa, y0 + s, zf], [xb, y0 + s, zf]), ...cosido([xa, ym, zf], [xb, ym, zf]), ...cosido([xa, y0 + s, zf], [xa, ym, zf]), ...cosido([xb, y0 + s, zf], [xb, ym, zf]));
     }
-    // volutas entre barrotes
-    const filas: { yRail: number; anchor: 'top' | 'bottom'; regionH: number; dosFilas: boolean }[] = [];
-    if (volArriba) filas.push({ yRail: yTB, anchor: 'top', regionH: upperH, dosFilas: volAbajo && zocalo });
-    if (volAbajo) filas.push(zocalo
-      ? { yRail: upperBot, anchor: 'bottom', regionH: upperH, dosFilas: volArriba }
-      : { yRail: y0 + s, anchor: 'bottom', regionH: lowerH, dosFilas: false });
+    // motivos entre barrotes (la segunda hoja es el reflejo de la primera)
+    const filas: { yRail: number; anchor: 'top' | 'bottom'; regionH: number; dosFilas: boolean; patron: Motivo[]; zona: string }[] = [];
+    if (decoArriba) filas.push({ yRail: yTB, anchor: 'top', regionH: upperH, dosFilas: decoAbajo && zocalo, patron: patSup, zona: 'Paño superior' });
+    if (decoAbajo) filas.push(zocalo
+      ? { yRail: upperBot, anchor: 'bottom', regionH: upperH, dosFilas: decoArriba, patron: patInf, zona: 'Paño inferior' }
+      : { yRail: y0 + s, anchor: 'bottom', regionH: lowerH, dosFilas: false, patron: patInf, zona: 'Paño inferior' });
     for (const fl of filas) {
       const hv = Math.min(g * 2.6, fl.regionH * (fl.dosFilas ? 0.38 : 0.62));
-      if (hv < g * 0.8) continue;
-      const out = filaVolutas(f, { xa, xb, xs, d, yRail: fl.yRail, anchor: fl.anchor, hv, tipo: tipoVol, zc });
-      h.deco.push(...out.ids); h.decoC.push(...out.contactos); h.nVol += out.nVol; h.nAro += out.nAro;
+      const out = filaMotivos(f, { xa, xb, xs, d, tw, yRail: fl.yRail, anchor: fl.anchor, hv, zc, patron: fl.patron, simetria, invertir: !hingeLeft, zona: fl.zona });
+      h.deco.push(...out.ids); h.decoC.push(...out.contactos); h.cuenta = sumaCuenta(h.cuenta, out.cuenta); h.avisos.push(...out.avisos);
     }
     // friso
-    if (frisoSel === 'aros') {
-      const out = frisoAros(f, { xa, xb, y0: yF, n: fA.n, zc });
-      h.deco.push(...out.ids); h.decoC.push(...out.contactos); h.nFriso = fA.n;
-    } else if (frisoSel === 'volutas') {
-      const out = frisoVolutas(f, { xa, xb, y0: yF, y1: yF + hbF, n: fV.n, zc });
-      h.deco.push(...out.ids); h.decoC.push(...out.contactos); h.nFriso = fV.n * 2;
+    if (plan) {
+      const out = frisoMotivos(f, plan, { xa, y0: yF, zc });
+      h.deco.push(...out.ids); h.decoC.push(...out.contactos); h.cuentaFriso = out.cuenta; h.avisos.push(...out.avisos);
     }
     // remate superior
     const xcs = xs.map((x) => x + d / 2);
@@ -892,7 +1189,11 @@ function buildPuerta(v: ParamValues) {
   const arcoC = hojas.flatMap((h) => h.arcoC);
   const nH = hojas.length;
   const nBar = h0.nBar, g = h0.g;
-  const nVol = h0.nVol * nH, nAro = h0.nAro * nH, nFriso = h0.nFriso * nH, nPuntas = h0.nPuntas * nH;
+  const nPuntas = h0.nPuntas * nH;
+  const cPanos = sumaCuenta(...hojas.map((h) => h.cuenta)), cFriso = sumaCuenta(...hojas.map((h) => h.cuentaFriso));
+  const cTodo = sumaCuenta(cPanos, cFriso);
+  const nRet = h0.nRet * nH;
+  const avisos = [...new Set(hojas.flatMap((h) => h.avisos))];
   const hayDeco = all('deco').length > 0 || forma === 'arco';
   const hayRemates = all('remates').length > 0 || all('bolas').length > 0;
   const hayHerr = pernios.length > 0;
@@ -900,7 +1201,7 @@ function buildPuerta(v: ParamValues) {
   // --- pasos ---
   const lineasCorte = [
     `Marco${nH > 1 ? ` (por hoja)` : ''}: 2 montantes de ${mm(stileTop - y0)} y ${1 + 1 + (friso ? 1 : 0) + 1} travesaños de ${mm(span)} en tubo ${fr.label}.`,
-    `Barrotes: ${nBar} por tramo en ${sp.label.toLowerCase()}, con un hueco libre de ${mm(g)}: ${zocalo ? '' : `${nBar} de ${mm(lowerH)} abajo y `}${nBar} de ${mm(upperH)} arriba.`,
+    `Barrotes: ${nBar} por tramo en ${sp.label.toLowerCase()}, con un hueco libre de ${mm(g)}: ${zocalo ? '' : `${nBar} de ${mm(lowerH)} abajo y `}${nBar} de ${mm(upperH)} arriba${nRet ? ` (${nRet} de ellos, retorcidos, se compran ya entorchados y se cortan igual)` : ''}.`,
     ...(forma === 'lanza' ? [`Lanzas: ${nBar * nH} trozos de ${mm(Lsob)} del mismo barrote, que se sueldan a tope sobre el travesaño superior.`] : []),
     ...(forma === 'arco' ? [`Arco: ${nH} de cuadradillo de ${ARC_A} mm de ${mm(span)} de luz y ${mm(rise)} de flecha. Los barrotes bajo el arco tienen cada uno su largo (míralo en la lista de piezas): córtalos después de presentar el arco, midiendo cada uno en su sitio.`] : []),
     ...(zocalo ? [`Zócalo: ${nH} chapa${nH > 1 ? 's' : ''} de 2 mm de ${mm(span)} × ${mm(lowerH)}.`] : []),
@@ -915,14 +1216,13 @@ function buildPuerta(v: ParamValues) {
     ],
   }));
 
-  if (modo === 'curvada' && (forma === 'arco' || nVol + nAro + nFriso > 0)) {
+  if (modo === 'curvada' && (forma === 'arco' || motivosBarra(cTodo) > 0)) {
     b.step({
       kind: 'preparar',
-      title: 'Curva las volutas, los aros y el arco',
+      title: forma === 'arco' ? 'Curva los motivos y el arco' : 'Curva los motivos de forja',
       summary: 'Antes de soldar nada, fabrica todas las piezas curvas iguales entre sí con una plantilla.',
       detail: [
-        ...(nVol + nFriso > 0 ? [`Dibuja a tamaño real cada tipo de voluta con la medida exterior de la lista de piezas y fabrica su plantilla. Necesitas ${nVol + (frisoSel === 'volutas' ? nFriso : 0)} volutas en total.`] : []),
-        ...(nAro + (frisoSel === 'aros' ? nFriso : 0) > 0 ? [`Aros: ${nAro + (frisoSel === 'aros' ? nFriso : 0)} en total. Curva un muelle largo de pletina alrededor de un tubo que haga de mandril, corta los aros uno a uno y ciérralos con un punto.`] : []),
+        ...lineasCurvar(cTodo),
         ...(forma === 'arco' ? [`Arco: traza en el suelo del taller el arco de ${mm(span)} de luz y ${mm(rise)} de flecha (radio ${mm(radioArco(span, rise))}) con un compás de cordel y curva el cuadradillo poco a poco hasta que coincida. Si no te ves capaz, en muchos almacenes de hierros lo curvan por encargo.`] : []),
         'Coloca cada pieza terminada sobre el dibujo: si no coincide, corrígela ahora. Una voluta mal hecha se nota mucho en la puerta acabada.',
       ],
@@ -992,26 +1292,23 @@ function buildPuerta(v: ParamValues) {
       title: 'Presenta y suelda las decoraciones',
       summary: [
         forma === 'arco' && 'el arco y los barrotes bajo él',
-        nVol > 0 && `${nVol} volutas en ${tipoVol}`,
-        nAro > 0 && `${nAro} aros en el hueco central`,
-        frisoSel === 'aros' && `el friso de ${nFriso} aros`,
-        frisoSel === 'volutas' && `el friso de ${nFriso} volutas`,
+        totalMotivos(cPanos) > 0 && resumenMotivos(cPanos) + ' entre barrotes',
+        totalMotivos(cFriso) > 0 && `el friso de ${resumenMotivos(cFriso)}`,
       ].filter(Boolean).join(', ').replace(/^./, (c) => c.toUpperCase()) + ': cada pieza apoya en dos barrotes o en barrote y travesaño.',
       detail: [
         ...(forma === 'arco' ? [
           `Presenta el arco entre los montantes, apoyado en el travesaño superior. Sus extremos tocan la cara interior de cada montante: puntéalos ahí y en el apoyo sobre el travesaño.`,
           ...(h0.bajoArco.length ? [`Mide en su sitio cada barrote bajo el arco (de ${mm(Math.min(...h0.bajoArco.map((id) => pieza(b, id).size[1])))} junto a los extremos a ${mm(Math.max(...h0.bajoArco.map((id) => pieza(b, id).size[1])))} en el centro), córtalo y puntéalo en la vertical del barrote de abajo: deben verse como un solo barrote que atraviesa el travesaño.`] : []),
         ] : []),
-        ...(nVol + nAro > 0 ? [`Volutas: cada una ocupa un hueco de ${mm(g)} entre barrotes, apoyada contra el travesaño. Las de la mitad izquierda se colocan al revés que las de la derecha para que el dibujo quede simétrico${nAro ? ', y el hueco central lleva un aro' : ''}.`] : []),
-        ...(frisoSel === 'aros' ? [`Friso: ${nFriso} aros de Ø${mm(fA.d)} en fila; cada uno toca los dos travesaños del friso y a sus vecinos. Empieza por el centro y ve hacia los montantes.`] : []),
-        ...(frisoSel === 'volutas' ? [`Friso: ${nFriso / 2 / nH} parejas de volutas en C espalda con espalda; cada voluta toca los dos travesaños del friso, su pareja por la espalda y la pareja vecina por los ojos.`] : []),
+        ...lineasMontaje({ g, simetria, panos: cPanos, friso: cFriso, frisoH: hbF }),
+        ...(nH > 1 && totalMotivos(cPanos) > 0 && !simetria ? ['La segunda hoja lleva el patrón reflejado, para que la cancela cerrada se vea simétrica.'] : []),
         'Puntea todas las piezas primero, mira la puerta de pie a unos metros y corrige lo que se vea desigual. Solo entonces suelda cada contacto con un cordón corto por delante y otro por detrás.',
       ],
       parts: decoIds,
       marks: [...puntos(decoC), ...cordonesDeco(decoC), ...puntos(arcoC), ...cordonesDeco(arcoC, ARC_A), ...ptsJ(b, allJ('jBajoArco')), ...cordJ(b, allJ('jBajoArco'))],
       technique: tecDecoracion(modo),
       tools: [...herramientasDeco(modo), ...info.equipo.slice(0, 1)],
-      check: 'Con la hoja de pie y a unos pasos, las volutas deben verse iguales, a la misma altura y simétricas respecto al centro. Ninguna debe atravesar un barrote ni quedar en el aire: todas tocan por al menos dos sitios.',
+      check: `Con la hoja de pie y a unos pasos, los motivos iguales deben verse a la misma altura${simetria ? ' y simétricos respecto al centro' : ''}. Ninguno debe atravesar un barrote ni quedar en el aire: todos tocan por al menos dos sitios (las hojas, por su base).`,
       warning: 'La barra de una voluta es fina y se funde mucho antes que el tubo: arco corto, poco tiempo y el calor apuntado al barrote o al travesaño.',
     });
   }
@@ -1104,7 +1401,7 @@ function buildPuerta(v: ParamValues) {
 
   // --- resumen ---
   const ac = ACABADOS[acabado] ?? ACABADOS.negro;
-  const decor = nVol + nAro + nFriso;
+  const decor = totalMotivos(cTodo);
   const ornado = decor > 0 || nPuntas > 0 || forma === 'arco';
   const totalW = postes ? postX[postX.length - 1] + P : dos ? 2 * W + GAP_C : W;
   const horas = 8 * nH + nBar * nH * 0.2 + (zocalo ? 1 : 0) + (forma === 'arco' ? 2 : 0) + (forma === 'lanza' ? 1 : 0)
@@ -1115,7 +1412,7 @@ function buildPuerta(v: ParamValues) {
     id: 'puerta-verja',
     title: 'Puerta de verja',
     craft: 'soldadura',
-    summary: `Puerta de verja de ${nH > 1 ? 'dos hojas' : 'una hoja'} de ${Math.round(W / 10)} × ${Math.round(H / 10)} cm${nH > 1 ? ' cada una' : ''}, ${formaTxt}${zocalo ? ', zócalo de chapa' : ''}${decor ? `, ${[nVol && `${nVol} volutas`, frisoSel !== 'no' && `friso de ${frisoSel}`].filter(Boolean).join(' y ')}` : ''}${nPuntas ? `, ${remate === 'lanza' ? 'lanzas' : 'pinchos'}` : ''}. ${ac.label}.`,
+    summary: `Puerta de verja de ${nH > 1 ? 'dos hojas' : 'una hoja'} de ${Math.round(W / 10)} × ${Math.round(H / 10)} cm${nH > 1 ? ' cada una' : ''}, ${formaTxt}${zocalo ? ', zócalo de chapa' : ''}${nRet ? ', barrotes retorcidos' : ''}${decor ? `, ${resumenMotivos(cTodo)}` : ''}${nPuntas ? `, ${remate === 'lanza' ? 'lanzas' : 'pinchos'}` : ''}. ${ac.label}.`,
     difficulty: modo === 'curvada' && (decor > 0 || forma === 'arco') ? 3 : 2,
     hours: Math.round(horas * 2) / 2,
     paint: ac.hex,
@@ -1124,8 +1421,11 @@ function buildPuerta(v: ParamValues) {
       `Barrotes repartidos para no pasar de ${mm(hmax)} de hueco libre: salen ${nBar} por tramo con ${mm(g)} reales. Si cambias el ancho, el nº de barrotes y el tamaño de las volutas se recalculan.`,
       'Las uniones del marco y de los barrotes son a tope con cortes rectos: el barrote apoya contra la cara del travesaño.',
       ...(forma === 'arco' ? ['El marco es rectangular (fácil de escuadrar) y el arco va encima, entre los montantes: es más sencillo que curvar el propio marco.'] : []),
-      ...(ornado ? ['Volutas, aros y puntas se dimensionan con el hueco libre real: cada voluta apoya en dos barrotes (o barrote y montante) y en el travesaño, para poder soldarla.'] : []),
+      ...(ornado ? [NOTA_MOTIVOS] : []),
       ...(notaFriso ? [notaFriso] : []),
+      ...avisos,
+      ...(nRet ? [NOTA_RETORCIDO] : []),
+      ...(cTodo.hoja ? [NOTA_HOJAS] : []),
       NOTA_PUNTAS,
       `Holgura bajo la hoja de ${mm(HOLGURA)}, ${mm(GAP_H)} en el lado de los pernios y ${mm(dos ? GAP_C : GAP_L)} en el de cierre: son decisiones de diseño; ajústalas a tu suelo y a tus pernios.`,
       'No se indica carga ni peso admisible: depende de tus soldaduras y del anclaje. Las secciones de tubo y barra son decisiones de diseño; compruébalas en tu almacén de hierros.',
@@ -1138,8 +1438,9 @@ function buildPuerta(v: ParamValues) {
       { label: 'Barrotes', value: `${nBar} por tramo, ${sp.label.toLowerCase()}, hueco ${Math.round(g)} mm` },
       { label: 'Zócalo', value: zocalo ? 'Chapa de 2 mm' : 'No' },
       { label: 'Puntas', value: nPuntas ? `${nPuntas} ${remate === 'lanza' ? 'de lanza' : 'pinchos'}` : 'No' },
-      { label: 'Volutas', value: nVol ? `${nVol} en ${tipoVol} (${volSel === 'ambas' ? 'arriba y abajo' : volSel === 'arriba' ? 'arriba' : 'abajo'})` : 'No' },
-      { label: 'Friso', value: frisoSel === 'aros' ? `${nFriso} aros` : frisoSel === 'volutas' ? `${nFriso} volutas` : 'No' },
+      { label: 'Tipo de barrote', value: nRet === 0 ? 'Liso' : nRet === nBar * nH * (zocalo ? 1 : 2) ? 'Retorcido' : 'Alterno liso y retorcido' },
+      { label: 'Entre barrotes', value: totalMotivos(cPanos) ? resumenMotivos(cPanos) + (simetria ? ', simétrico' : '') : 'Sin decoración' },
+      { label: 'Friso', value: totalMotivos(cFriso) ? `${resumenMotivos(cFriso)}, ${Math.round(hbF)} mm de alto` : 'No' },
       { label: 'Bolas en montantes', value: bolas ? 'Sí' : 'No' },
       { label: 'Herrajes', value: `${pernios.length} pernios${cierre !== 'ninguno' ? `, ${cierre}` : ''}${batiente ? ', batiente' : ''}` },
       { label: 'Postes', value: postes ? `${pt.label}, ${placa ? 'placa de anclaje' : 'para empotrar'}, ${bolaPoste ? 'bola' : 'tapa'}` : 'No' },

@@ -1,0 +1,87 @@
+/* Plan de corte: diagramas de barras y tableros a escala. Usa los tokens de app.css. */
+
+.cutplan { display: grid; gap: 22px; min-width: 0; }
+.cp-head { display: flex; gap: 16px 24px; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; }
+.cp-head > div { display: grid; gap: 8px; max-width: 66ch; min-width: 0; }
+.cp-head p { color: var(--ink-2); }
+.cp-empty { color: var(--ink-3); padding: 18px 0; }
+
+/* resumen: números grandes en una regla */
+.cp-totals { display: flex; flex-wrap: wrap; gap: 0; margin: 0; border: 1.5px solid var(--ink); border-radius: var(--r-m); background: var(--rule); overflow: hidden; }
+.cp-totals > div { flex: 1 1 140px; padding: 12px 16px; border-right: 1.5px solid var(--ink); display: grid; gap: 2px; align-content: start; }
+.cp-totals > div:last-child { border-right: 0; }
+.cp-totals dt { font-size: 0.82rem; font-weight: 620; color: var(--rule-ink); }
+.cp-totals dd { margin: 0; font-family: var(--font-display); font-stretch: 80%; font-weight: 750; font-size: 2rem; line-height: 1.05; color: var(--rule-ink); }
+@media (max-width: 520px) {
+  .cp-totals > div { flex-basis: 50%; border-bottom: 1.5px solid var(--ink); }
+  .cp-totals > div:nth-child(2n) { border-right: 0; }
+  .cp-totals > div:nth-last-child(-n + 2):nth-child(odd), .cp-totals > div:last-child { border-bottom: 0; }
+  .cp-totals dd { font-size: 1.7rem; }
+}
+
+.cp-warn { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.cp-warn li, .cp-oversize { display: flex; gap: 10px; align-items: flex-start; padding: 10px 14px; border-radius: var(--r-s); background: var(--warn-bg); border: 1px solid #e2b96a; font-size: 0.93rem; }
+.cp-warn svg, .cp-oversize svg { flex: none; margin-top: 3px; color: var(--red-deep); }
+.cp-oversize { margin: 0; }
+
+.cp-switch { font-weight: 600; align-items: flex-start; }
+.cp-switch small { display: block; color: var(--ink-3); font-weight: 500; font-size: 0.84rem; }
+.cp-switch i { margin-top: 2px; }
+
+/* un material = un bloque separado por la regla negra de la casa */
+.cp-mat { display: grid; gap: 12px; padding-top: 18px; border-top: 1.5px solid var(--ink); min-width: 0; }
+.cp-mat-head { display: flex; gap: 10px 14px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.cp-mat-head :is(h3, h4) { font-size: 1.12rem; font-weight: 680; min-width: 0; overflow-wrap: anywhere; }
+
+.cp-controls { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: flex-end; }
+.cp-field { display: grid; gap: 4px; width: 168px; max-width: 100%; }
+.cp-field label { font-weight: 620; font-size: 0.9rem; }
+.cp-field .numbox { min-height: 44px; }
+.cp-field .numbox[data-bad] { border-color: var(--red); }
+.cp-bad { color: var(--red-deep); font-size: 0.82rem; font-weight: 600; }
+.cp-hint { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; font-size: 0.88rem; color: var(--ink-3); min-height: 44px; }
+.cp-hint .btn { min-height: 40px; }
+.cp-stats { color: var(--ink-2); font-size: 0.93rem; }
+.cp-stats strong { color: var(--ink); }
+
+/* el diagrama se desplaza dentro de su contenedor, nunca la página */
+.cp-scroll { overflow-x: auto; max-width: 100%; border: 1px solid var(--line); border-radius: var(--r-m); background: var(--card); padding: 10px 6px 6px; scrollbar-width: thin; }
+.cp-scroll:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; box-shadow: 0 0 0 5px var(--rule); }
+.cp-svg { display: block; width: 100%; height: auto; font-family: var(--font-body); color: var(--ink); }
+.cp-svg text { fill: var(--ink); }
+.cp-t1 { font-family: var(--font-display); font-weight: 700; font-size: 15px; font-stretch: 88%; }
+.cp-t2 { font-size: 12.5px; fill: var(--ink-3) !important; font-weight: 600; }
+.cp-bar-bg { fill: var(--paper-2); stroke: var(--ink); stroke-width: 1.5; }
+.cp-piece { stroke: var(--ink); stroke-width: 1.5; }
+.cp-piece.wood { fill: var(--wood-soft); }
+.cp-piece.steel { fill: var(--steel-soft); }
+.cp-ref { fill: var(--rule); stroke: var(--ink); stroke-width: 1.5; }
+.cp-reft { font-family: var(--font-display); font-weight: 750; font-size: 12px; text-anchor: middle; dominant-baseline: central; }
+.cp-len { font-family: var(--font-display); font-stretch: 80%; font-weight: 650; font-size: 13.5px; }
+.cp-onwaste { paint-order: stroke; stroke: var(--paper-2); stroke-width: 4px; stroke-linejoin: round; }
+.cp-waste { stroke: var(--ink); stroke-width: 1; stroke-dasharray: 4 3; }
+.cp-kerf { stroke: var(--red); stroke-width: 1.6; }
+.cp-tick { stroke: var(--ink-3); stroke-width: 1; }
+.cp-sheet-bg { stroke: var(--ink); stroke-width: 1.5; }
+.cp-dim line { stroke: var(--ink-2); stroke-width: 1.2; }
+.cp-dim text { font-size: 13px; font-weight: 650; fill: var(--ink-2); }
+.cp-dim { color: var(--ink-2); }
+.cp-rot { font-size: 13px; fill: var(--ink-2); }
+
+.cp-sheet { margin: 0; display: grid; gap: 6px; min-width: 0; }
+.cp-sheet figcaption { font-size: 0.92rem; color: var(--ink-2); }
+.cp-sheet figcaption strong { color: var(--ink); font-family: var(--font-display); font-size: 1rem; }
+
+.cp-table summary { cursor: pointer; display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 4px; font-weight: 620; font-size: 0.93rem; color: var(--ink-2); border-radius: var(--r-s); }
+.cp-table summary:hover { color: var(--ink); }
+.cp-table[open] summary { margin-bottom: 8px; }
+.cp-table table.data { min-width: 420px; }
+.cp-table th[scope='row'] { text-align: left; font-weight: 650; color: var(--ink); font-size: 0.94rem; padding: 9px 12px; background: transparent; border-bottom: 1px solid var(--paper-3); white-space: nowrap; }
+
+@media (max-width: 600px) {
+  .cp-field { width: calc(50% - 8px); }
+  .cp-hint { min-height: 0; flex-basis: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cp-scroll { scroll-behavior: auto; }
+}

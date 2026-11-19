@@ -2,17 +2,20 @@ import type { Generator, Mark, ParamValues, Vec3 } from '../core/types';
 import { Builder, alturaArco, cordonPerimetral, hw, mm, punto, tornillos } from '../core/builder';
 import { TEC_PUNTEO, infoProceso, pasoCordones, pasoCortar, pasoPreparar, pasoRepasar, pieza, type Proceso } from './taburete-acero';
 import {
-  ACABADOS, BARROTES, NOTA_PUNTAS, OPC_BARROTE, OPC_REMATE, PARAM_FORJA, PARAM_PROCESO, TUBOS, barrote, bolaSobre, cordJ, cordonAnillo,
-  cordonesDeco, ends, filaVolutas, frisoAros, fuentesForja, herramientasDeco, letrasForja, medidaFrisoAros, paramAcabado, pasoPintarForja,
-  ptsJ, puntaSobre, puntos, r1, reparto, seguridadForja, tecDecoracion, tuboQ, type Forja, type J, type ModoForja, type Remate,
+  ACABADOS, BARROTES, NOTA_HOJAS, NOTA_MOTIVOS, NOTA_PUNTAS, NOTA_RETORCIDO, OPC_BARROTE, OPC_REMATE, PARAM_FORJA, PARAM_PROCESO, TUBOS,
+  barrote, barrotesRetorcidos, bolaSobre, cordJ, cordonAnillo, cordonesDeco, ends, filaMotivos, frisoMotivos, fuentesForja, herramientasDeco,
+  leerPatron, letrasForja, lineasCurvar, lineasMontaje, motivosBarra, paramAcabado, paramPatron, paramSimetria, paramTipoBarrote, pasoPintarForja,
+  patronActivo, planFriso, ptsJ, puntaSobre, puntos, r1, reparto, resumenMotivos, seguridadForja, sumaCuenta, tecDecoracion, totalMotivos, tuboQ,
+  type Forja, type J, type ModoForja, type Motivo, type Remate,
 } from './puerta-verja';
 
 /**
  * VALLA (soldadura, cerrajería).
  * Tramos modulares entre postes que se comparten: barrotes verticales (con remate recto,
- * pasante, alterno u ondulado), lamas horizontales de tubo rectangular o marco con malla
- * electrosoldada. Detalles de forja: puntas o pinchos, volutas o friso de aros en la parte
- * baja, remate de postes y placas de anclaje o postes para empotrar.
+ * pasante, alterno u ondulado; lisos, retorcidos o alternos), lamas horizontales de tubo
+ * rectangular o marco con malla electrosoldada. Decoración de forja por patrones repetibles
+ * en el paño de arriba, en el de abajo y en un friso bajo; puntas o pinchos, remate de postes
+ * y placas de anclaje o postes para empotrar.
  */
 
 const PLACA_T = 8;
@@ -54,18 +57,6 @@ export const valla: Generator = {
     { key: 'suelo', label: 'Separación del suelo', type: 'number', min: 30, max: 200, step: 10, unit: 'mm', default: 80, group: 'Forma', help: 'Hueco bajo el travesaño inferior (o la primera lama).' },
     { key: 'puntas', label: 'Puntas', type: 'select', default: 'ninguno', group: 'Detalles', options: OPC_REMATE, visible: (v) => v.forma === 'barrotes', help: 'Centradas sobre cada barrote.' },
     {
-      key: 'decoBaja', label: 'Decoración en la parte baja', type: 'select', default: 'no', group: 'Detalles', visible: (v) => v.forma === 'barrotes',
-      options: [
-        { value: 'no', label: 'Ninguna' },
-        { value: 'volutas', label: 'Volutas entre barrotes' },
-        { value: 'aros', label: 'Friso de aros' },
-      ],
-    },
-    {
-      key: 'tipoVoluta', label: 'Tipo de voluta', type: 'select', default: 'C', group: 'Detalles', visible: (v) => v.forma === 'barrotes' && v.decoBaja === 'volutas',
-      options: [{ value: 'C', label: 'En C' }, { value: 'S', label: 'En S' }],
-    },
-    {
       key: 'remPoste', label: 'Remate de los postes', type: 'select', default: 'tapa', group: 'Detalles',
       options: [
         { value: 'tapon', label: 'Tapón de plástico' },
@@ -89,6 +80,7 @@ export const valla: Generator = {
       options: [{ value: '40', label: '40 × 40 × 1,5 mm' }, { value: '40g', label: '40 × 40 × 2 mm' }],
     },
     { key: 'barrote', label: 'Barrotes', type: 'select', default: 'cuad12', group: 'Material', options: OPC_BARROTE, visible: (v) => v.forma === 'barrotes' },
+    paramTipoBarrote((v) => v.forma === 'barrotes'),
     {
       key: 'lama', label: 'Lamas', type: 'select', default: '60x20', group: 'Material', visible: (v) => v.forma === 'lamas',
       options: [{ value: '60x20', label: 'Tubo 60 × 20 × 1,5 mm' }, { value: '80x20', label: 'Tubo 80 × 20 × 1,5 mm' }],
@@ -97,14 +89,19 @@ export const valla: Generator = {
       key: 'malla', label: 'Malla', type: 'select', default: '50', group: 'Material', visible: (v) => v.forma === 'malla',
       options: [{ value: '50', label: 'Cuadro de 50 mm, alambre de 4 mm' }, { value: '100', label: 'Cuadro de 100 mm, alambre de 4 mm' }],
     },
+    paramPatron('patSup', 'Paño superior', '', 'Motivos entre barrotes, colgados del travesaño de arriba. Se repiten en orden hueco a hueco.', (v) => v.forma === 'barrotes'),
+    paramPatron('patInf', 'Paño inferior', '', 'Motivos entre barrotes, apoyados abajo (sobre el friso si lo hay).', (v) => v.forma === 'barrotes'),
+    paramPatron('patFriso', 'Friso bajo', '', 'Banda de motivos sobre el travesaño inferior, cerrada por otro travesaño. Vacío: sin friso.', (v) => v.forma === 'barrotes'),
+    paramSimetria((v) => v.forma === 'barrotes'),
     paramAcabado('negro'),
     { ...PARAM_FORJA, visible: (v) => v.forma === 'barrotes' },
     PARAM_PROCESO,
   ],
+  dragAxes: { x: 'largo', y: 'alto' },
   presets: [
     {
       id: 'lisa', name: 'Valla lisa de barrotes', blurb: 'Un tramo de 2 m × 1 m con barrotes rectos entre dos travesaños: la base de cualquier cerramiento.',
-      values: { largo: 2000, alto: 1000, tramos: 1, hueco: 110, forma: 'barrotes', remate: 'recto', suelo: 80, puntas: 'ninguno', decoBaja: 'no', remPoste: 'tapa', anclaje: 'placa', poste: '60', travesano: '40', barrote: 'cuad16', acabado: 'antracita', forja: 'comprada', proceso: 'electrodo' },
+      values: { largo: 2000, alto: 1000, tramos: 1, hueco: 110, forma: 'barrotes', remate: 'recto', suelo: 80, puntas: 'ninguno', patSup: '', patInf: '', patFriso: '', simetria: true, remPoste: 'tapa', anclaje: 'placa', poste: '60', travesano: '40', barrote: 'cuad16', acabado: 'antracita', forja: 'comprada', proceso: 'electrodo' },
     },
     {
       id: 'lamas', name: 'Valla de lamas', blurb: 'Dos tramos de 1,8 m con lamas de tubo 80 × 20: da intimidad y un aire moderno.',
@@ -112,7 +109,11 @@ export const valla: Generator = {
     },
     {
       id: 'clasica', name: 'Verja clásica con lanzas y volutas', blurb: 'Barrotes ondulados en arco con puntas de lanza, volutas en C abajo y bolas en los postes.',
-      values: { largo: 1800, alto: 1300, tramos: 2, hueco: 105, forma: 'barrotes', remate: 'arco', sobresale: 110, flecha: 170, suelo: 80, puntas: 'lanza', decoBaja: 'volutas', tipoVoluta: 'C', remPoste: 'bola', anclaje: 'placa', poste: '80', travesano: '40g', barrote: 'cuad12', acabado: 'negro', forja: 'comprada', proceso: 'electrodo' },
+      values: { largo: 1800, alto: 1300, tramos: 2, hueco: 105, forma: 'barrotes', remate: 'arco', tipoBarrote: 'liso', sobresale: 110, flecha: 170, suelo: 80, puntas: 'lanza', patSup: '', patInf: 'C', patFriso: '', simetria: true, remPoste: 'bola', anclaje: 'placa', poste: '80', travesano: '40g', barrote: 'cuad12', acabado: 'negro', forja: 'comprada', proceso: 'electrodo' },
+    },
+    {
+      id: 'retorcidos', name: 'Verja de barrotes retorcidos', blurb: 'Barrotes entorchados pasantes con pinchos, espirales bajo el travesaño y friso bajo de rombos y aros.',
+      values: { largo: 2000, alto: 1400, tramos: 1, hueco: 110, forma: 'barrotes', remate: 'pasante', sobresale: 120, suelo: 80, puntas: 'pincho', patSup: 'espiral', patInf: '', patFriso: 'aro,rombo', simetria: true, remPoste: 'bola', anclaje: 'placa', poste: '80', travesano: '40g', barrote: 'cuad16', tipoBarrote: 'retorcido', acabado: 'negro', forja: 'comprada', proceso: 'electrodo' },
     },
   ],
   build,
@@ -124,8 +125,9 @@ function build(v: ParamValues) {
   const remSel = String(v.remate) as 'recto' | 'pasante' | 'alterno' | 'arco' | 'concavo';
   const Lsob = Number(v.sobresale), flecha = Number(v.flecha), gapL = Number(v.huecoLamas), suelo = Number(v.suelo);
   const puntasSel = (forma === 'barrotes' ? String(v.puntas) : 'ninguno') as Remate;
-  let decoBaja = forma === 'barrotes' ? String(v.decoBaja) : 'no';
-  const tipoVol = v.tipoVoluta === 'S' ? 'S' : 'C';
+  const barr = forma === 'barrotes';
+  const patSup = barr ? leerPatron(v.patSup) : [], patInf = barr ? leerPatron(v.patInf) : [], patFriso = barr ? leerPatron(v.patFriso) : [];
+  const simetria = v.simetria !== false;
   const remPoste = String(v.remPoste);
   const placa = v.anclaje !== 'empotrar';
   const pt = TUBOS[String(v.poste)] ?? TUBOS['60'];
@@ -168,11 +170,17 @@ function build(v: ParamValues) {
   const decoC: Vec3[] = [];
   const remates: string[] = [], jRem: J[] = [];
   const puntasC: Mark[] = [];
-  let nBar = 0, g = 0, nVol = 0, nAro = 0, nFriso = 0, nPuntas = 0, nLamas = 0, gapLr = 0;
-  let friso = decoBaja === 'aros';
-  const fA = medidaFrisoAros(Lt, Math.max(90, Math.min(150, hmax * 1.05)));
-  if (friso && yT - s - (yB + s + fA.alto + s) < 200) { friso = false; decoBaja = 'no'; }
-  const barBot = friso ? yB + s + fA.alto + s : yB + s;
+  let nBar = 0, g = 0, nPuntas = 0, nLamas = 0, gapLr = 0, nRet = 0;
+  let cPanos: Partial<Record<Motivo, number>> = {}, cFriso: Partial<Record<Motivo, number>> = {};
+  const avisos: string[] = [];
+  let plan = planFriso(Lt, Math.max(90, Math.min(150, hmax * 1.05)), patFriso, simetria);
+  if (plan && yT - s - (yB + s + plan.h + s) < 200) {
+    avisos.push('Con esta altura no cabe el friso bajo: se ha quitado. Sube los postes o separa menos la valla del suelo para recuperarlo.');
+    plan = null;
+  } else if (patronActivo(patFriso) && !plan) avisos.push('El patrón del friso no deja sitio a ningún motivo con este largo: se ha quitado el friso.');
+  const friso = plan !== null;
+  const hF = plan ? plan.h : 0;
+  const barBot = friso ? yB + s + hF + s : yB + s;
   const barTop = yT - s;
   const regionH = barTop - barBot;
   const rise = Math.max(0, Math.min(flecha, Lt * 0.25));
@@ -207,23 +215,26 @@ function build(v: ParamValues) {
       continue;
     }
     // barrotes
-    if (friso) rail(yB + s + fA.alto);
+    if (friso) rail(yB + s + hF);
     const rp = reparto(xa, xb, d, hmax);
     nBar = rp.xs.length; g = rp.g;
-    for (const x of rp.xs) {
-      const id = barrote(f, sp, 'Barrote', regionH, x, barBot, zc);
+    const ret = barrotesRetorcidos(String(v.tipoBarrote), sp, rp.xs.length);
+    if (ret.aviso) avisos.push(ret.aviso);
+    rp.xs.forEach((x, i) => {
+      const id = barrote(f, sp, 'Barrote', regionH, x, barBot, zc, ret.tw[i]);
       bars.push(id); jBars.push([id, 'min'], [id, 'max']);
+      if (ret.tw[i]) nRet++;
+    });
+    if (plan) {
+      const out = frisoMotivos(f, plan, { xa, y0: yB + s, zc });
+      deco.push(...out.ids); decoC.push(...out.contactos); cFriso = sumaCuenta(cFriso, out.cuenta); avisos.push(...out.avisos);
     }
-    if (friso) {
-      const out = frisoAros(f, { xa, xb, y0: yB + s, n: fA.n, zc });
-      deco.push(...out.ids); decoC.push(...out.contactos); nFriso += fA.n;
-    }
-    if (decoBaja === 'volutas') {
-      const hv = Math.min(g * 2.6, regionH * 0.45);
-      if (hv >= g * 0.8) {
-        const out = filaVolutas(f, { xa, xb, xs: rp.xs, d, yRail: barBot, anchor: 'bottom', hv, tipo: tipoVol, zc });
-        deco.push(...out.ids); decoC.push(...out.contactos); nVol += out.nVol; nAro += out.nAro;
-      }
+    const dos = patronActivo(patSup) && patronActivo(patInf);
+    for (const [patron, anchor, zona] of [[patSup, 'top', 'Paño superior'], [patInf, 'bottom', 'Paño inferior']] as const) {
+      if (!patronActivo(patron)) continue;
+      const hv = Math.min(g * 2.6, regionH * (dos ? 0.36 : 0.45));
+      const out = filaMotivos(f, { xa, xb, xs: rp.xs, d, tw: ret.tw, yRail: anchor === 'top' ? barTop : barBot, anchor, hv, zc, patron, simetria, zona });
+      deco.push(...out.ids); decoC.push(...out.contactos); cPanos = sumaCuenta(cPanos, out.cuenta); avisos.push(...out.avisos);
     }
     // remate
     const xcs = rp.xs.map((x) => x + d / 2);
@@ -286,7 +297,7 @@ function build(v: ParamValues) {
       ...(forma === 'lamas'
         ? [`Lamas: ${lamas.length} tubos ${lamaH} × ${lamaT} × 1,5 mm de ${mm(Lt)} (${nLamas} por tramo).`]
         : [`Travesaños: ${rails.length} tubos ${tr.label} de ${mm(Lt)}.`]),
-      ...(forma === 'barrotes' ? [`Barrotes: ${totBar} de ${mm(regionH)} en ${sp.label.toLowerCase()} (${nBar} por tramo, hueco libre de ${mm(g)}).`] : []),
+      ...(forma === 'barrotes' ? [`Barrotes: ${totBar} de ${mm(regionH)} en ${sp.label.toLowerCase()} (${nBar} por tramo, hueco libre de ${mm(g)})${nRet ? `; ${nRet} de ellos retorcidos, que se compran ya entorchados` : ''}.`] : []),
       ...(remates.some((id) => pieza(b, id).shape !== 'cone') ? [`Lanzas: trozos del mismo barrote que se sueldan a tope sobre el travesaño superior; ${remSel === 'pasante' ? `todos de ${mm(Lsob)}` : 'cada uno con su largo (míralo en la lista de piezas); numéralos según los cortes'}.`] : []),
       ...(forma === 'malla' ? [`Malla: ${mallas.length} paños de ${mm(Lt)} × ${mm(yT - s - yB - s)}. Córtala con cizalla o amoladora justo después de un alambre transversal.`] : []),
       ...(placa ? [`Placas: ${placas.length} cuadrados de ${PL} × ${PL} × ${PLACA_T} mm con un taladro en cada esquina a 25 mm de los bordes (del diámetro que pida el anclaje que vayas a usar).`] : []),
@@ -295,14 +306,14 @@ function build(v: ParamValues) {
   b.step(pasoPreparar({ proceso, extra: ['Compra tubo y barra negros o decapados, no galvanizados: la valla irá pintada.'] }));
 
   const hayDeco = deco.length > 0;
-  if (modo === 'curvada' && hayDeco) {
+  const cTodo = sumaCuenta(cPanos, cFriso);
+  if (modo === 'curvada' && motivosBarra(cTodo) > 0) {
     b.step({
       kind: 'preparar',
-      title: 'Curva las volutas y los aros',
+      title: 'Curva los motivos de forja',
       summary: 'Fabrica todas las piezas curvas iguales entre sí con una plantilla antes de soldar.',
       detail: [
-        ...(nVol ? [`Dibuja a tamaño real la voluta con la medida exterior de la lista de piezas y fabrica su plantilla. Necesitas ${nVol}.`] : []),
-        ...(nFriso + nAro ? [`Aros: ${nFriso + nAro}. Curva un muelle largo de pletina alrededor de un tubo que haga de mandril, córtalos uno a uno y ciérralos con un punto.`] : []),
+        ...lineasCurvar(cTodo),
         'Coloca cada pieza sobre el dibujo y corrígela antes de seguir.',
       ],
       parts: [],
@@ -354,7 +365,7 @@ function build(v: ParamValues) {
       summary: `Los ${postes.length} postes y los travesaños forman el bastidor de la valla, que se puntea tumbado comprobando las diagonales.`,
       detail: [
         'Tumba los postes en el suelo plano del taller, paralelos y calzados a la misma altura, con la separación del largo del tramo.',
-        `Mete los travesaños a tope entre cada pareja de postes: el inferior a ${mm(yB - yP)} del pie del poste, el superior con su cara de arriba a ${mm(yT - yP)}${friso ? `, y el del friso ${mm(fA.alto)} por encima del inferior` : ''}. Todos centrados en el grueso del poste.`,
+        `Mete los travesaños a tope entre cada pareja de postes: el inferior a ${mm(yB - yP)} del pie del poste, el superior con su cara de arriba a ${mm(yT - yP)}${friso ? `, y el del friso ${mm(hF)} por encima del inferior` : ''}. Todos centrados en el grueso del poste.`,
         ...TEC_PUNTEO.how.slice(0, 2),
         'Da la vuelta al bastidor y puntea las caras opuestas.',
       ],
@@ -419,17 +430,16 @@ function build(v: ParamValues) {
     b.step({
       kind: 'soldar',
       title: 'Presenta y suelda las decoraciones',
-      summary: `${[nVol && `${nVol} volutas en ${tipoVol}`, nAro && `${nAro} aros`, nFriso && `un friso de ${nFriso} aros`].filter(Boolean).join(' y ').replace(/^./, (c) => c.toUpperCase())}: cada pieza apoya en dos barrotes o en barrote y travesaño.`,
+      summary: `${[totalMotivos(cPanos) && `${resumenMotivos(cPanos)} entre barrotes`, totalMotivos(cFriso) && `un friso bajo de ${resumenMotivos(cFriso)}`].filter(Boolean).join(' y ').replace(/^./, (c) => c.toUpperCase())}: cada pieza apoya en dos barrotes o en barrote y travesaño.`,
       detail: [
-        ...(nVol ? [`Cada voluta ocupa un hueco de ${mm(g)} entre barrotes, apoyada sobre el travesaño de abajo. Las de la mitad izquierda de cada tramo van al revés que las de la derecha para que el dibujo sea simétrico${nAro ? '; el hueco central lleva un aro' : ''}.`] : []),
-        ...(nFriso ? [`Friso: ${fA.n} aros de Ø${mm(fA.d)} por tramo; cada uno toca los dos travesaños del friso y a sus vecinos. Empieza por el centro del tramo.`] : []),
+        ...lineasMontaje({ g, simetria, panos: cPanos, friso: cFriso, frisoH: hF }),
         'Puntea todas, mira la valla de pie desde unos metros y corrige lo que se vea desigual. Después, un cordón corto por delante y otro por detrás en cada contacto.',
       ],
       parts: deco,
       marks: [...puntos(decoC), ...cordonesDeco(decoC)],
       technique: tecDecoracion(modo),
       tools: [...herramientasDeco(modo), info.equipo[0]],
-      check: 'Ninguna voluta debe atravesar un barrote ni quedar en el aire: todas tocan por al menos dos sitios.',
+      check: 'Ningún motivo debe atravesar un barrote ni quedar en el aire: todos tocan por al menos dos sitios (las hojas, por su base).',
       warning: 'La barra de forja es fina: arco corto y el calor apuntado al barrote o al travesaño.',
     });
   }
@@ -508,14 +518,14 @@ function build(v: ParamValues) {
 
   // --- resumen ---
   const ac = ACABADOS[acabado] ?? ACABADOS.negro;
-  const horas = 4 + 2 * nT + totBar * 0.15 + lamas.length * 0.25 + mallas.length * 1 + (nVol + nAro + nFriso) * (modo === 'curvada' ? 0.7 : 0.25)
+  const horas = 4 + 2 * nT + totBar * 0.15 + lamas.length * 0.25 + mallas.length * 1 + totalMotivos(cTodo) * (modo === 'curvada' ? 0.7 : 0.25)
     + remates.length * 0.08 + postes.length * 0.4;
   const remTxt = { recto: 'recto', pasante: 'pasantes', alterno: 'alternos', arco: 'ondulado en arco', concavo: 'ondulado en festón' }[remSel];
   return b.finish({
     id: 'valla',
     title: 'Valla',
     craft: 'soldadura',
-    summary: `Valla de ${nT} tramo${nT > 1 ? 's' : ''} de ${(Lt / 1000).toFixed(2).replace('.', ',')} m y ${Math.round(Hp / 10)} cm de alto, ${forma === 'barrotes' ? `de barrotes (remate ${remTxt})` : forma === 'lamas' ? 'de lamas horizontales' : 'de malla'}${nPuntas ? ` con ${puntasSel === 'lanza' ? 'lanzas' : 'pinchos'}` : ''}${nVol ? ', volutas abajo' : ''}${nFriso ? ', friso de aros' : ''}. ${ac.label}.`,
+    summary: `Valla de ${nT} tramo${nT > 1 ? 's' : ''} de ${(Lt / 1000).toFixed(2).replace('.', ',')} m y ${Math.round(Hp / 10)} cm de alto, ${forma === 'barrotes' ? `de barrotes (remate ${remTxt})` : forma === 'lamas' ? 'de lamas horizontales' : 'de malla'}${nPuntas ? ` con ${puntasSel === 'lanza' ? 'lanzas' : 'pinchos'}` : ''}${nRet ? ', barrotes retorcidos' : ''}${totalMotivos(cTodo) ? `, ${resumenMotivos(cTodo)}` : ''}. ${ac.label}.`,
     difficulty: modo === 'curvada' && hayDeco ? 3 : forma === 'malla' ? 1 : 2,
     hours: Math.round(horas * 2) / 2,
     paint: ac.hex,
@@ -529,7 +539,10 @@ function build(v: ParamValues) {
       ...(forma === 'lamas' ? [`${nLamas} lamas por tramo con ${mm(gapLr)} reales de separación (se ajusta para llenar el alto).`] : []),
       'Uniones a tope con cortes rectos: el travesaño (o la lama) apoya contra la cara del poste y el barrote contra la del travesaño.',
       ...(maxSob ? [`Las lanzas sobresalen hasta ${mm(maxSob)} por encima del travesaño superior.`] : []),
-      ...(decoBaja !== String(v.decoBaja) && forma === 'barrotes' ? ['Con esta altura no cabe el friso de aros: se ha quitado.'] : []),
+      ...(totalMotivos(cTodo) ? [NOTA_MOTIVOS] : []),
+      ...[...new Set(avisos)],
+      ...(nRet ? [NOTA_RETORCIDO] : []),
+      ...(cTodo.hoja ? [NOTA_HOJAS] : []),
       NOTA_PUNTAS,
       'No se indica resistencia ni empuje admisible: depende de las soldaduras, del anclaje y del viento. Las secciones son decisiones de diseño; compruébalas en tu almacén de hierros.',
     ],
@@ -539,7 +552,11 @@ function build(v: ParamValues) {
       { label: 'Tipo', value: forma === 'barrotes' ? `Barrotes, remate ${remTxt}` : forma === 'lamas' ? `Lamas ${lamaH} × ${lamaT} mm` : `Malla de ${cell} mm` },
       ...(forma === 'barrotes' ? [{ label: 'Barrotes', value: `${nBar} por tramo, ${sp.label.toLowerCase()}, hueco ${Math.round(g)} mm` }] : []),
       { label: 'Puntas', value: nPuntas ? `${nPuntas} ${puntasSel === 'lanza' ? 'de lanza' : 'pinchos'}` : 'No' },
-      { label: 'Parte baja', value: nVol ? `${nVol} volutas en ${tipoVol}` : nFriso ? `Friso de ${nFriso} aros` : 'Sin decoración' },
+      ...(forma === 'barrotes' ? [
+        { label: 'Tipo de barrote', value: nRet === 0 ? 'Liso' : nRet === totBar ? 'Retorcido' : 'Alterno liso y retorcido' },
+        { label: 'Entre barrotes', value: totalMotivos(cPanos) ? resumenMotivos(cPanos) + (simetria ? ', simétrico' : '') : 'Sin decoración' },
+        { label: 'Friso bajo', value: totalMotivos(cFriso) ? `${resumenMotivos(cFriso)}, ${Math.round(hF)} mm de alto` : 'No' },
+      ] : []),
       { label: 'Postes', value: `${postes.length} de ${pt.label}, ${placa ? 'con placa de anclaje' : 'para empotrar'}, ${remPoste === 'bola' ? 'bola' : remPoste === 'tapa' ? 'tapa soldada' : 'tapón'}` },
       ...(forma === 'barrotes' ? [{ label: 'Decoración', value: modo === 'comprada' ? 'Elementos de forja comprados' : 'Curvados en frío por ti' }] : []),
       { label: 'Acabado', value: ac.label },

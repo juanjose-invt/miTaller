@@ -2,16 +2,17 @@ import type { Generator, Mark, ParamValues, Vec3 } from '../core/types';
 import { Builder, alturaArco, cordonPerimetral, hw, mm, radioArco, tornillos } from '../core/builder';
 import { TEC_PUNTEO, infoProceso, pasoCordones, pasoCortar, pasoPreparar, pasoRepasar, pieza, type Proceso } from './taburete-acero';
 import {
-  ACABADOS, BARROTES, NOTA_PUNTAS, OPC_REMATE, PARAM_FORJA, PARAM_PROCESO, barrote, cordJ, cordonesDeco, cosido,
-  filaVolutas, frisoAros, fuentesForja, herramientasDeco, huecos, letrasForja, medidaFrisoAros, paramAcabado, pasoPintarForja, ptsJ,
-  puntaSobre, puntos, r1, reparto, seguridadForja, tecDecoracion, volutaEn, aroEn, altoMinC, type Forja, type J, type ModoForja, type Remate,
+  ACABADOS, BARROTES, NOTA_HOJAS, NOTA_MOTIVOS, NOTA_PUNTAS, NOTA_RETORCIDO, OPC_REMATE, PARAM_FORJA, PARAM_PROCESO, barrote, barrotesRetorcidos,
+  cordJ, cordonesDeco, cosido, filaMotivos, frisoMotivos, fuentesForja, herramientasDeco, leerPatron, letrasForja, lineasCurvar, lineasMontaje,
+  motivosBarra, paramAcabado, paramPatron, paramSimetria, paramTipoBarrote, pasoPintarForja, patronActivo, planFriso, ptsJ, puntaSobre, puntos, r1,
+  reparto, resumenMotivos, seguridadForja, sumaCuenta, tecDecoracion, totalMotivos, type Forja, type J, type ModoForja, type Motivo, type Remate,
 } from './puerta-verja';
 
 /**
  * REJA DE VENTANA (soldadura, cerrajería) — el proyecto de forja más asequible.
- * Marco de cuadradillo, tubo o pletina de canto con barrotes y, si se quiere, travesaño
- * intermedio, remate superior en arco, volutas en C o en S, friso de aros, macollas,
- * puntas y patillas para empotrar u orejetas para atornillar al muro.
+ * Marco de cuadradillo, tubo o pletina de canto con barrotes lisos o retorcidos y, si se
+ * quiere, travesaño intermedio, remate superior en arco, patrones de motivos de forja arriba,
+ * abajo y en un friso, macollas, puntas y patillas para empotrar u orejetas para atornillar.
  */
 
 const MARCOS: Record<string, { F: number; D: number; kind: 'cuad' | 'tubo' | 'pletina'; label: string }> = {
@@ -28,7 +29,7 @@ export const reja: Generator = {
   craft: 'soldadura',
   difficulty: 1,
   description:
-    'Reja fija para ventana: un marco con barrotes y, si quieres, remate en arco, volutas, aros, macollas y puntas. Es el proyecto de forja más asequible para empezar a decorar.',
+    'Reja fija para ventana: un marco con barrotes y, si quieres, remate en arco, volutas, aros, rombos, corazones, hojas, macollas y puntas. Es el proyecto de forja más asequible para empezar a decorar.',
   params: [
     { key: 'ancho', label: 'Ancho', type: 'number', min: 400, max: 2000, step: 10, unit: 'mm', default: 1000, group: 'Medidas', help: 'Por fuera del marco. Para empotrar, el hueco de la ventana; para atornillar en fachada, algo más que el hueco.' },
     { key: 'alto', label: 'Alto', type: 'number', min: 400, max: 1800, step: 10, unit: 'mm', default: 1100, group: 'Medidas', help: 'Por fuera del marco, hasta la clave del arco si lo lleva.' },
@@ -42,20 +43,6 @@ export const reja: Generator = {
     },
     { key: 'flecha', label: 'Flecha del arco', type: 'number', min: 60, max: 400, step: 10, unit: 'mm', default: 180, group: 'Forma', visible: (v) => v.forma === 'arco' },
     { key: 'intermedio', label: 'Travesaño intermedio', type: 'boolean', default: true, group: 'Forma', help: 'Rigidiza los barrotes en la parte baja.' },
-    {
-      key: 'volutas', label: 'Volutas entre barrotes', type: 'select', default: 'no', group: 'Detalles',
-      options: [
-        { value: 'no', label: 'Sin volutas' },
-        { value: 'arriba', label: 'Arriba', hint: 'Bajo el travesaño superior o dentro del arco' },
-        { value: 'abajo', label: 'Abajo' },
-        { value: 'ambas', label: 'Arriba y abajo' },
-      ],
-    },
-    {
-      key: 'tipoVoluta', label: 'Tipo de voluta', type: 'select', default: 'C', group: 'Detalles', visible: (v) => v.volutas !== 'no',
-      options: [{ value: 'C', label: 'En C' }, { value: 'S', label: 'En S' }],
-    },
-    { key: 'aros', label: 'Friso de aros', type: 'boolean', default: false, group: 'Detalles', help: 'Banda de aros sobre el travesaño intermedio.', visible: (v) => v.intermedio === true },
     { key: 'macollas', label: 'Macollas en los barrotes', type: 'boolean', default: false, group: 'Detalles', help: 'Abultamientos de forja que se enhebran en cada barrote.' },
     { key: 'puntas', label: 'Puntas', type: 'select', default: 'ninguno', group: 'Detalles', options: OPC_REMATE, help: 'Sobre el marco, en la vertical de cada barrote.' },
     {
@@ -81,18 +68,28 @@ export const reja: Generator = {
         { value: 'red16', label: 'Redondo macizo Ø16 mm' },
       ],
     },
+    paramTipoBarrote(),
+    paramPatron('patSup', 'Paño superior', '', 'Motivos entre barrotes bajo el travesaño de arriba; con remate en arco, en abanico sobre el travesaño de arranque. Se repiten en orden hueco a hueco.'),
+    paramPatron('patInf', 'Paño inferior', '', 'Motivos entre barrotes sobre el travesaño de abajo.'),
+    paramPatron('patFriso', 'Friso', '', 'Banda de motivos sobre el travesaño intermedio, cerrada por otro travesaño. Vacío: sin friso.', (v) => v.intermedio === true),
+    paramSimetria(),
     paramAcabado('negro'),
     PARAM_FORJA,
     PARAM_PROCESO,
   ],
+  dragAxes: { x: 'ancho', y: 'alto' },
   presets: [
     {
       id: 'sencilla', name: 'Reja sencilla', blurb: 'Marco de cuadradillo, barrotes rectos y travesaño bajo: 100 × 110 cm, lista en una tarde.',
-      values: { ancho: 1000, alto: 1100, hueco: 110, forma: 'recta', intermedio: true, volutas: 'no', aros: false, macollas: false, puntas: 'ninguno', anclaje: 'patillas', marco: 'cuad20', barrote: 'cuad12', acabado: 'blanco', forja: 'comprada', proceso: 'electrodo' },
+      values: { ancho: 1000, alto: 1100, hueco: 110, forma: 'recta', intermedio: true, patSup: '', patInf: '', patFriso: '', simetria: true, macollas: false, puntas: 'ninguno', anclaje: 'patillas', marco: 'cuad20', barrote: 'cuad12', acabado: 'blanco', forja: 'comprada', proceso: 'electrodo' },
     },
     {
       id: 'forja', name: 'Reja de forja', blurb: 'Remate en arco con abanico de volutas, friso de aros, macollas y volutas abajo.',
-      values: { ancho: 1000, alto: 1300, hueco: 105, forma: 'arco', flecha: 220, intermedio: true, volutas: 'ambas', tipoVoluta: 'C', aros: true, macollas: true, puntas: 'ninguno', anclaje: 'patillas', marco: 'cuad20', barrote: 'cuad12', acabado: 'negro', forja: 'comprada', proceso: 'electrodo' },
+      values: { ancho: 1000, alto: 1300, hueco: 105, forma: 'arco', flecha: 220, intermedio: true, patSup: 'C', patInf: 'C', patFriso: 'aro', simetria: true, macollas: true, puntas: 'ninguno', anclaje: 'patillas', marco: 'cuad20', barrote: 'cuad12', acabado: 'negro', forja: 'comprada', proceso: 'electrodo' },
+    },
+    {
+      id: 'corazones', name: 'Reja de corazones y hojas', blurb: 'Barrotes alternos lisos y retorcidos, corazones arriba, friso de rombos, hojas abajo y macollas.',
+      values: { ancho: 1000, alto: 1200, hueco: 110, forma: 'recta', intermedio: true, patSup: 'corazon', patInf: 'hoja', patFriso: 'rombo', simetria: true, macollas: true, puntas: 'ninguno', anclaje: 'orejetas', marco: 'cuad20', barrote: 'cuad12', tipoBarrote: 'alterno', acabado: 'verde', forja: 'comprada', proceso: 'electrodo' },
     },
   ],
   build,
@@ -102,9 +99,8 @@ function build(v: ParamValues) {
   const W = Number(v.ancho), H = Number(v.alto), hmax = Number(v.hueco);
   const arco = v.forma === 'arco';
   const inter = v.intermedio === true;
-  const volSel = String(v.volutas);
-  const tipoVol = v.tipoVoluta === 'S' ? 'S' : 'C';
-  let aros = inter && v.aros === true;
+  const patSup = leerPatron(v.patSup), patInf = leerPatron(v.patInf), patFriso = inter ? leerPatron(v.patFriso) : [];
+  const simetria = v.simetria !== false;
   const macollas = v.macollas === true;
   const puntasSel = String(v.puntas) as Remate;
   const patillas = v.anclaje !== 'orejetas';
@@ -144,24 +140,34 @@ function build(v: ParamValues) {
   const yTB = yS - F; // cara inferior del travesaño superior (o de arranque)
   rail(0); rail(yTB, arco ? 'Travesaño de arranque' : 'Travesaño');
   // travesaño intermedio y friso
-  const fA = medidaFrisoAros(span, Math.max(85, Math.min(140, hmax)));
+  const avisos: string[] = [];
+  let plan = planFriso(span, Math.max(85, Math.min(140, hmax)), patFriso, simetria);
   let yM = Math.round(Math.max(F + 120, Math.min(H * 0.28, yTB - 250)));
-  if (aros && yTB - (yM + F + fA.alto + F) < 200) aros = false;
+  if (plan && yTB - (yM + F + plan.h + F) < 200) {
+    avisos.push('Con esta altura no cabe el friso: se ha quitado. Sube el alto de la reja para recuperarlo.');
+    plan = null;
+  } else if (patronActivo(patFriso) && !plan) avisos.push('El patrón del friso no deja sitio a ningún motivo con este ancho: se ha quitado el friso.');
+  const hF = plan ? plan.h : 0;
   if (inter && yTB - (yM + F) < 150) yM = Math.max(F + 60, yTB - F - 150);
   if (inter) rail(yM);
-  if (aros) rail(yM + F + fA.alto, 'Travesaño del friso');
-  const upperBot = !inter ? F : aros ? yM + 2 * F + fA.alto : yM + F;
+  if (plan) rail(yM + F + hF, 'Travesaño del friso');
+  const upperBot = !inter ? F : plan ? yM + 2 * F + hF : yM + F;
 
   // barrotes
   const { xs, g } = reparto(xa, xb, d, hmax);
+  const ret = barrotesRetorcidos(String(v.tipoBarrote), sp, xs.length);
+  if (ret.aviso) avisos.push(ret.aviso);
+  const tw = ret.tw;
   const barras: string[] = [];
   const jBarras: J[] = [];
+  let nRet = 0;
   const regiones: [number, number][] = inter ? [[F, yM], [upperBot, yTB]] : [[F, yTB]];
   for (const [ya, yb] of regiones) {
-    for (const x of xs) {
-      const id = barrote(f, sp, ya < (inter ? yM : -1) ? 'Barrote inferior' : 'Barrote', r1(yb - ya), x, ya, zc);
+    xs.forEach((x, i) => {
+      const id = barrote(f, sp, ya < (inter ? yM : -1) ? 'Barrote inferior' : 'Barrote', r1(yb - ya), x, ya, zc, tw[i]);
       barras.push(id); jBarras.push([id, 'min'], [id, 'max']);
-    }
+      if (tw[i]) nRet++;
+    });
   }
   const xcs = xs.map((x) => x + d / 2);
 
@@ -193,58 +199,40 @@ function build(v: ParamValues) {
   // decoración
   const deco: string[] = [];
   const decoC: Vec3[] = [];
-  let nVol = 0, nAro = 0;
-  const volArriba = volSel === 'arriba' || volSel === 'ambas';
-  const volAbajo = volSel === 'abajo' || volSel === 'ambas';
+  let cPanos: Partial<Record<Motivo, number>> = {}, cFriso: Partial<Record<Motivo, number>> = {};
+  const decoArriba = patronActivo(patSup), decoAbajo = patronActivo(patInf);
   const upperH = yTB - upperBot;
-  let hvArriba = 0, hvAbajo = 0;
-  if (volArriba) {
-    if (arco) {
-      // abanico: volutas apoyadas sobre el travesaño de arranque, bajo el arco
-      const mid = W / 2;
-      for (const [g0, g1] of huecos(xa, xb, xs, d)) {
-        const gc = (g0 + g1) / 2, gw = g1 - g0;
-        const libre = Math.min(archUnder(g0).under, archUnder(g1).under) - yS;
-        const hv = Math.min(tipoVol === 'C' ? altoMinC(gw) + 6 : gw * 1.9, libre - 2);
-        if (Math.abs(gc - mid) < 1) {
-          if (libre >= gw + 2) {
-            const a = aroEn(f, { cx: gc, cy: yS + gw / 2, d: gw, zc, lados: ['l', 'r', 'b'], name: 'Aro central' });
-            deco.push(a.id); decoC.push(...a.contactos); nAro++;
-          }
-          continue;
-        }
-        if (hv < gw * 0.8) continue;
-        const vv = volutaEn(f, { x0: g0, x1: g1, y0: yS, y1: yS + hv, zc, curve: tipoVol, mirror: gc > mid, lados: ['l', 'r', 'b'] });
-        deco.push(vv.id); decoC.push(...vv.contactos); nVol++;
-      }
-    } else {
-      hvArriba = Math.min(tipoVol === 'C' ? altoMinC(g) + 6 : g * 1.9, upperH * (volAbajo && !inter ? 0.36 : 0.45));
-      if (hvArriba >= g * 0.8) {
-        const out = filaVolutas(f, { xa, xb, xs, d, yRail: yTB, anchor: 'top', hv: hvArriba, tipo: tipoVol, zc });
-        deco.push(...out.ids); decoC.push(...out.contactos); nVol += out.nVol; nAro += out.nAro;
-      } else hvArriba = 0;
-    }
+  let altoArriba = 0, altoAbajo = 0;
+  const suma = (out: ReturnType<typeof filaMotivos>) => {
+    deco.push(...out.ids); decoC.push(...out.contactos); cPanos = sumaCuenta(cPanos, out.cuenta); avisos.push(...out.avisos);
+    return out.alto;
+  };
+  if (decoArriba) {
+    altoArriba = arco
+      // abanico: motivos apoyados sobre el travesaño de arranque, bajo el arco (más bajos hacia los extremos)
+      ? suma(filaMotivos(f, {
+          xa, xb, xs, d, tw, yRail: yS, anchor: 'bottom', hv: rise + F, zc, patron: patSup, simetria, zona: 'Paño superior (bajo el arco)',
+          hvAt: (g0, g1) => Math.min(archUnder(g0).under, archUnder(g1).under) - yS - 2,
+        }))
+      : suma(filaMotivos(f, { xa, xb, xs, d, tw, yRail: yTB, anchor: 'top', hv: Math.min(g * 2.6, upperH * (decoAbajo && !inter ? 0.36 : 0.45)), zc, patron: patSup, simetria, zona: 'Paño superior' }));
   }
-  if (volAbajo) {
+  if (decoAbajo) {
     const regH = inter ? yM - F : upperH;
-    hvAbajo = Math.min(tipoVol === 'C' ? altoMinC(g) + 6 : g * 1.9, regH * (inter ? 0.7 : volArriba && !arco ? 0.36 : 0.45));
-    if (hvAbajo >= g * 0.8) {
-      const out = filaVolutas(f, { xa, xb, xs, d, yRail: F, anchor: 'bottom', hv: hvAbajo, tipo: tipoVol, zc });
-      deco.push(...out.ids); decoC.push(...out.contactos); nVol += out.nVol; nAro += out.nAro;
-    } else hvAbajo = 0;
+    const hv = Math.min(g * 2.6, regH * (inter ? 0.7 : decoArriba && !arco ? 0.36 : 0.45));
+    altoAbajo = suma(filaMotivos(f, { xa, xb, xs, d, tw, yRail: F, anchor: 'bottom', hv, zc, patron: patInf, simetria, zona: 'Paño inferior' }));
   }
-  let nFriso = 0;
-  if (aros) {
-    const out = frisoAros(f, { xa, xb, y0: yM + F, n: fA.n, zc });
-    deco.push(...out.ids); decoC.push(...out.contactos); nFriso = fA.n;
+  if (plan) {
+    const out = frisoMotivos(f, plan, { xa, y0: yM + F, zc });
+    deco.push(...out.ids); decoC.push(...out.contactos); cFriso = out.cuenta; avisos.push(...out.avisos);
   }
+  const cTodo = sumaCuenta(cPanos, cFriso);
 
-  // macollas (en el tramo principal, a media altura del hueco libre de volutas)
+  // macollas (en el tramo principal, a media altura del hueco que dejan los motivos)
   const macIds: string[] = [];
   const DM = Math.round(d * 2.4);
   if (macollas) {
-    const top = yTB - (!arco && volArriba ? hvArriba : 0);
-    const bot = upperBot + (!inter && volAbajo ? hvAbajo : 0);
+    const top = yTB - (!arco && decoArriba ? altoArriba : 0);
+    const bot = upperBot + (!inter && decoAbajo ? altoAbajo : 0);
     const ym = (top + bot) / 2;
     for (const xc of xcs) {
       const r = f.L(`macolla|${d}|${DM}`, 'Macolla');
@@ -302,15 +290,14 @@ function build(v: ParamValues) {
   b.step(pasoPreparar({ proceso, extra: ['Compra barra y tubo negros o decapados, no galvanizados: la reja irá pintada.'] }));
 
   const hayDeco = deco.length > 0 || arco;
-  if (modo === 'curvada' && hayDeco) {
+  if (modo === 'curvada' && (arco || motivosBarra(cTodo) > 0)) {
     b.step({
       kind: 'preparar',
-      title: arco ? 'Curva el arco, las volutas y los aros' : 'Curva las volutas y los aros',
+      title: arco ? 'Curva el arco y los motivos' : 'Curva los motivos de forja',
       summary: 'Fabrica todas las piezas curvas iguales entre sí, con plantilla, antes de soldar.',
       detail: [
         ...(arco ? [`Traza en el suelo el arco de ${mm(W)} de luz y ${mm(rise)} de flecha (radio ${mm(radioArco(W, rise))}) con un compás de cordel y curva la barra poco a poco hasta que coincida. Si no te ves capaz, en muchos almacenes de hierros lo curvan por encargo.`] : []),
-        ...(nVol ? [`Volutas: ${nVol}. Dibújalas a tamaño real con la medida exterior de la lista de piezas y hazles una plantilla.`] : []),
-        ...(nAro + nFriso ? [`Aros: ${nAro + nFriso}. Curva un muelle de pletina alrededor de un tubo que haga de mandril, córtalos y ciérralos con un punto.`] : []),
+        ...lineasCurvar(cTodo),
       ],
       parts: [],
       technique: tecDecoracion('curvada'),
@@ -326,7 +313,7 @@ function build(v: ParamValues) {
     summary: 'Montantes y travesaños se puntean tumbados sobre una superficie plana, comprobando las diagonales.',
     detail: [
       'Tumba los dos montantes sobre la mesa de soldar y mete entre ellos los travesaños a tope, enrasados por delante.',
-      `Travesaño inferior abajo del todo; ${inter ? `el intermedio con su cara inferior a ${mm(yM)}; ` : ''}${aros ? `el del friso ${mm(fA.alto)} por encima del intermedio; ` : ''}el ${arco ? 'de arranque' : 'superior'} enrasado con la punta de los montantes.`,
+      `Travesaño inferior abajo del todo; ${inter ? `el intermedio con su cara inferior a ${mm(yM)}; ` : ''}${plan ? `el del friso ${mm(hF)} por encima del intermedio; ` : ''}el ${arco ? 'de arranque' : 'superior'} enrasado con la punta de los montantes.`,
       ...TEC_PUNTEO.how.slice(0, 2),
       'Da la vuelta al marco y puntea las caras opuestas.',
     ],
@@ -370,21 +357,21 @@ function build(v: ParamValues) {
     b.step({
       kind: 'soldar',
       title: 'Presenta y suelda las decoraciones',
-      summary: `${[arco && 'El arco', nVol && `${nVol} volutas en ${tipoVol}`, nAro && `${nAro} aro${nAro > 1 ? 's' : ''} central${nAro > 1 ? 'es' : ''}`, nFriso && `un friso de ${nFriso} aros`].filter(Boolean).join(', ')}: cada pieza apoya en dos barrotes o en barrote y travesaño.`,
+      summary: `${[arco && 'El arco', totalMotivos(cPanos) && `${resumenMotivos(cPanos)} entre barrotes`, totalMotivos(cFriso) && `un friso de ${resumenMotivos(cFriso)}`].filter(Boolean).join(', ').replace(/^./, (c) => c.toUpperCase())}: cada pieza apoya en dos barrotes o en barrote y travesaño.`,
       detail: [
         ...(arco ? [
           'Presenta el arco sobre los montantes y el travesaño de arranque; puntéalo sobre cada montante.',
           ...(bajoArco.length ? [`Mide en su sitio cada barrote bajo el arco (de ${mm(Math.min(...bajoArco.map((id) => pieza(b, id).size[1])))} a ${mm(Math.max(...bajoArco.map((id) => pieza(b, id).size[1])))}), córtalo y puntéalo en la vertical del barrote de abajo.`] : []),
         ] : []),
-        ...(nVol ? [`Volutas: cada una ocupa un hueco de ${mm(g)} entre barrotes y apoya en el travesaño${arco && volArriba ? '; las del arco forman un abanico sobre el travesaño de arranque y son más bajas cerca de los extremos' : ''}. Las de la mitad izquierda van al revés que las de la derecha.`] : []),
-        ...(nFriso ? [`Friso: ${nFriso} aros de Ø${mm(fA.d)} en fila entre el travesaño intermedio y el del friso.`] : []),
+        ...lineasMontaje({ g, simetria, panos: cPanos, friso: cFriso, frisoH: hF }),
+        ...(arco && decoArriba && deco.length ? ['Los motivos de arriba forman un abanico sobre el travesaño de arranque, bajo el arco: cerca de los extremos el arco baja y los huecos que no tienen altura se quedan libres.'] : []),
         'Puntea todas, mira la reja de pie y corrige lo que se vea desigual. Después, un cordón corto por delante y otro por detrás en cada contacto.',
       ],
       parts: [...arcoIds, ...bajoArco, ...deco],
       marks: [...puntos(arcoC), ...cordonesDeco(arcoC, Dp), ...ptsJ(b, jBajo), ...cordJ(b, jBajo), ...puntos(decoC), ...cordonesDeco(decoC)],
       technique: tecDecoracion(modo),
       tools: [...herramientasDeco(modo), info.equipo[0]],
-      check: 'Ninguna voluta debe atravesar un barrote ni quedar en el aire: todas tocan por al menos dos sitios.',
+      check: 'Ningún motivo debe atravesar un barrote ni quedar en el aire: todos tocan por al menos dos sitios (las hojas, por su base).',
       warning: 'La barra de forja es fina: arco corto y el calor apuntado al barrote o al travesaño.',
     });
   }
@@ -422,7 +409,7 @@ function build(v: ParamValues) {
 
   b.step(pasoRepasar([
     'Repasa los cordones vistos del marco con el disco de láminas.',
-    ...(hayDeco ? ['En volutas y aros no amoles: cepillo pequeño y repasa solo las gotas que sobresalgan.'] : []),
+    ...(hayDeco ? ['En los motivos de forja no amoles: cepillo pequeño y repasa solo las gotas que sobresalgan.'] : []),
   ]));
 
   b.step(pasoPintarForja(acabado));
@@ -455,13 +442,13 @@ function build(v: ParamValues) {
 
   // --- resumen ---
   const ac = ACABADOS[acabado] ?? ACABADOS.negro;
-  const decor = nVol + nAro + nFriso;
+  const decor = totalMotivos(cTodo);
   const horas = 4 + barras.length * 0.15 + (arco ? 1.5 : 0) + decor * (modo === 'curvada' ? 0.7 : 0.25) + macIds.length * 0.1 + puntasIds.length * 0.08;
   return b.finish({
     id: 'reja',
     title: 'Reja de ventana',
     craft: 'soldadura',
-    summary: `Reja de ${Math.round(W / 10)} × ${Math.round(H / 10)} cm ${arco ? 'con remate en arco' : 'recta'}, marco de ${mc.label.toLowerCase()} y ${xs.length} barrotes${decor ? `, ${[nVol && `${nVol} volutas`, nFriso && 'friso de aros'].filter(Boolean).join(' y ')}` : ''}${macollas ? ', macollas' : ''}${puntasIds.length ? ', puntas' : ''}. ${ac.label}.`,
+    summary: `Reja de ${Math.round(W / 10)} × ${Math.round(H / 10)} cm ${arco ? 'con remate en arco' : 'recta'}, marco de ${mc.label.toLowerCase()} y ${xs.length} barrotes${nRet ? (nRet === barras.length ? ' retorcidos' : ' lisos y retorcidos') : ''}${decor ? `, ${resumenMotivos(cTodo)}` : ''}${macollas ? ', macollas' : ''}${puntasIds.length ? ', puntas' : ''}. ${ac.label}.`,
     difficulty: modo === 'curvada' && hayDeco ? 3 : hayDeco || macollas ? 2 : 1,
     hours: Math.round(horas * 2) / 2,
     paint: ac.hex,
@@ -473,7 +460,10 @@ function build(v: ParamValues) {
       `Barrotes repartidos para no pasar de ${mm(hmax)} de hueco libre: salen ${xs.length} con ${mm(g)} reales. Si cambias el ancho, el nº de barrotes y el tamaño de las volutas se recalculan.`,
       'Uniones a tope con cortes rectos: el barrote apoya contra la cara del travesaño.',
       ...(arco ? ['El arco apoya sobre los montantes y un travesaño de arranque recto: el marco sigue siendo rectangular y fácil de escuadrar.'] : []),
-      ...(v.aros === true && inter && !aros ? ['Con esta altura no cabe el friso de aros: se ha quitado.'] : []),
+      ...(decor ? [NOTA_MOTIVOS] : []),
+      ...[...new Set(avisos)],
+      ...(nRet ? [NOTA_RETORCIDO] : []),
+      ...(cTodo.hoja ? [NOTA_HOJAS] : []),
       NOTA_PUNTAS,
       'Las secciones de marco y barrote son decisiones de diseño; compruébalas en tu almacén de hierros.',
     ],
@@ -483,8 +473,9 @@ function build(v: ParamValues) {
       { label: 'Marco', value: mc.label },
       { label: 'Barrotes', value: `${xs.length}, ${sp.label.toLowerCase()}, hueco ${Math.round(g)} mm` },
       { label: 'Travesaño intermedio', value: inter ? `Sí, a ${yM} mm` : 'No' },
-      { label: 'Volutas', value: nVol ? `${nVol} en ${tipoVol}` : 'No' },
-      { label: 'Friso de aros', value: nFriso ? `${nFriso} aros` : 'No' },
+      { label: 'Tipo de barrote', value: nRet === 0 ? 'Liso' : nRet === barras.length ? 'Retorcido' : 'Alterno liso y retorcido' },
+      { label: 'Entre barrotes', value: totalMotivos(cPanos) ? resumenMotivos(cPanos) + (simetria ? ', simétrico' : '') : 'Sin decoración' },
+      { label: 'Friso', value: totalMotivos(cFriso) ? `${resumenMotivos(cFriso)}, ${Math.round(hF)} mm de alto` : 'No' },
       { label: 'Macollas', value: macollas ? `${macIds.length}` : 'No' },
       { label: 'Puntas', value: puntasIds.length ? `${puntasIds.length} ${puntasSel === 'lanza' ? 'de lanza' : 'pinchos'}` : 'No' },
       { label: 'Anclaje', value: patillas ? `${anclaIds.length} patillas para empotrar` : `${anclaIds.length} orejetas atornilladas` },

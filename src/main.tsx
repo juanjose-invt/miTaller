@@ -4,6 +4,7 @@ import { HashRouter } from 'react-router-dom';
 import '@fontsource-variable/bricolage-grotesque/standard.css';
 import '@fontsource-variable/instrument-sans/index.css';
 import './styles/app.css';
+import './styles/v2.css';
 import { App } from './App';
 
 createRoot(document.getElementById('root')!).render(
