@@ -279,7 +279,7 @@ function ajustar(c: Curva, tw: number, th: number | null, mirror: boolean) {
     h = th === null ? w : Math.min(th * 3, Math.max(VB * 2 + 2, h + dh * 0.9));
     e = envolvente(curvaPts(c, w, h, mirror));
   }
-  const out = { w, h, e, ok: Math.abs(e.u1 - e.u0 - tw) < 0.5 && (th === null || Math.abs(e.v1 - e.v0 - th) < 0.5) };
+  const out = { w, h, e, ok: Math.abs(e.u1 - e.u0 - tw) < 0.3 && (th === null || Math.abs(e.v1 - e.v0 - th) < 0.3) };
   if (memoFit.size > 6000) memoFit.clear();
   memoFit.set(key, out);
   return out;
@@ -344,13 +344,14 @@ export function curvaEn(
   const fit = ajustar(o.c, tw, o.libre ? null : th, o.mirror);
   if (!fit.ok) return null;
   const { w, h, e } = fit;
-  const at: Vec3 = [o.x0 - e.u0, o.y0 - e.v0, o.zc - VB / 2];
   const ew = e.u1 - e.u0, eh = e.v1 - e.v0;
+  // la curva queda centrada en su caja: el pequeño error del ajuste se reparte a los dos lados
+  const at: Vec3 = [o.x0 + (tw - ew) / 2 - e.u0, o.libre ? o.y0 - e.v0 : o.y0 + (th - eh) / 2 - e.v0, o.zc - VB / 2];
   const dev = polyLength(e.pts);
   const curvada = f.modo === 'curvada';
   const base = NOMBRE_PIEZA[o.c];
   const r = f.L(`${o.c}|${fx(ew)}|${fx(eh)}|${f.modo}|${curvada ? Math.round(dev + 20) : ''}`, o.name ? `${base} ${o.name}` : base);
-  const medida = `${Math.round(eh)} × ${Math.round(ew)} mm`;
+  const medida = `${Math.round(r1(eh))} × ${Math.round(r1(ew))} mm`;
   const stock = curvada ? 'Pletina de acero 12×6 mm' : `${base} de forja de ${medida}, barra de ${VB} mm`;
   const id = o.c === 'rombo'
     ? f.b.rombo({ ref: r.ref, name: r.name, face: [w, h], normal: 'z', bar: VB, at, stock })
@@ -365,7 +366,7 @@ export function curvaEn(
   } else {
     p.stockKind = 'unidad';
     p.cut = [r1(Math.max(ew, eh)), r1(Math.min(ew, eh)), VB];
-    p.note = `Medida exterior terminada: ${Math.round(eh)} mm de alto × ${Math.round(ew)} mm de ancho.`;
+    p.note = `Medida exterior terminada: ${Math.round(r1(eh))} mm de alto × ${Math.round(r1(ew))} mm de ancho.`;
   }
   const bs = bordes(e);
   const w3 = (q: Pt): Vec3 => [r1(at[0] + q[0]), r1(at[1] + q[1]), o.zc];
