@@ -55,7 +55,7 @@ try {
   await go('/crear/modular');
   await page.getByRole('button', { name: 'Todo a la vista' }).click();
   const before = page.url();
-  await page.getByRole('button', { name: /Añadir.*derecha/i }).first().click().catch(() => {});
+  await page.getByRole('button', { name: /Cuerpo a la derecha/ }).click();
   await page.waitForTimeout(800);
   ok('modular: el editor de distribución está y modifica el diseño', (await page.locator('svg').count()) > 0 && page.url() !== before);
 
