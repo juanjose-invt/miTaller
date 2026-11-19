@@ -69,7 +69,8 @@
 
 /* ---------- pestaña «Ensambles sin tornillos» ---------- */
 .jx-intro { color: var(--ink-2); max-width: 64ch; font-size: 0.95rem; margin-bottom: 14px; }
-.jx-index { display: grid; gap: 18px; padding-bottom: 28px; margin-bottom: 8px; border-bottom: 1.5px solid var(--ink); }
+.jx-index { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; padding-bottom: 28px; margin-bottom: 8px; border-bottom: 1.5px solid var(--ink); }
+.jx-index > div { min-width: 0; }
 .jx-index-label { font-family: var(--font-display); font-weight: 700; font-size: 1.02rem; margin-bottom: 8px; display: flex; gap: 8px; align-items: baseline; }
 .jx-index-label span { font-family: var(--font-body); font-size: 0.8rem; font-weight: 600; color: var(--ink-3); }
 .jx-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: 10px; }
