@@ -229,3 +229,6 @@ table.shop .unit { font-family: var(--font-body); font-weight: 500; font-size: 0
 .extras-bar p { color: #cfc6b4; font-size: 0.92rem; max-width: 52ch; }
 .extras-bar strong { display: block; color: var(--paper); font-size: 1rem; }
 .tech-joint { border-radius: var(--r-s); overflow: hidden; background: var(--paper); color: var(--ink); }
+/* la pista de uso va abajo para no chocar con los botones del visor */
+.viewer-hint { top: auto; bottom: 10px; max-width: 70%; }
+.piece-pop { z-index: 2; }

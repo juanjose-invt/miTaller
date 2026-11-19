@@ -26,33 +26,27 @@ export function volutaPoints(w: number, h: number, curve: 'C' | 'S' | 'espiral',
   return [...top, ...bottom];
 }
 
-/** Corazón de forja: dos volutas enfrentadas que se unen abajo en punta. Curva cerrada por abajo. */
+/** Corazón de forja: dos volutas en J que nacen en la punta, abrazan cada lóbulo y se enrollan hacia dentro. */
 export function corazonPoints(w: number, h: number, bar: number): Pt[] {
-  const m = bar / 2;
-  const W = w - bar, H = h - bar;
+  const m = bar / 2, W = w - bar, H = h - bar;
   const R = W / 4; // radio de cada lóbulo
+  const cx = m + W / 2 + R, cy = m + H - R; // centro del lóbulo derecho
   const half: Pt[] = [];
-  // lóbulo derecho: espiral que nace dentro y sale por el exterior derecho
-  const cx = m + W / 2 + R, cy = m + H - R;
-  const turns = 1.1, tmax = turns * Math.PI * 2;
-  for (let i = 0; i <= 30; i++) {
-    const t = tmax * (0.2 + 0.8 * (i / 30));
-    const r = R * (t / tmax);
-    const phi = Math.PI + (tmax - t) * -1 + tmax; // gira en sentido horario y termina en el exterior derecho
-    half.push([cx + r * Math.cos(phi - tmax + Math.PI * 0), cy + r * Math.sin(phi - tmax + Math.PI * 0)]);
+  // tramo bajo: de la punta (centro abajo) al lado derecho del lóbulo, con tangente vertical al llegar
+  const P0: Pt = [m + W / 2, m], P1: Pt = [m + W / 2 + W * 0.16, m + (cy - m) * 0.28], P2: Pt = [m + W, cy - (cy - m) * 0.55], P3: Pt = [m + W, cy];
+  for (let i = 0; i <= 16; i++) {
+    const t = i / 16, a = (1 - t) ** 3, b = 3 * (1 - t) ** 2 * t, c = 3 * (1 - t) * t * t, d = t ** 3;
+    half.push([a * P0[0] + b * P1[0] + c * P2[0] + d * P3[0], a * P0[1] + b * P1[1] + c * P2[1] + d * P3[1]]);
   }
-  // normaliza: asegura que el último punto es el extremo derecho del lóbulo
-  const last: Pt = [m + W, cy];
-  half.push(last);
-  // baja en curva suave hasta la punta inferior central
-  for (let i = 1; i <= 14; i++) {
-    const k = i / 14;
-    const x = m + W - (W / 2) * (1 - Math.cos((k * Math.PI) / 2));
-    const y = cy - (cy - m) * Math.sin((k * Math.PI) / 2);
-    half.push([x, y]);
+  // lóbulo: media vuelta por arriba hasta el centro y después espiral hacia dentro (el ojo)
+  const n = 40, giro = Math.PI + (Math.PI * 5) / 3;
+  for (let i = 1; i <= n; i++) {
+    const th = (giro * i) / n;
+    const r = th <= Math.PI ? R : R * (1 - 0.62 * ((th - Math.PI) / (giro - Math.PI)));
+    half.push([cx + r * Math.cos(th), cy + r * Math.sin(th)]);
   }
-  const left = half.map(([x, y]): Pt => [2 * m + W - x, y]).reverse();
-  return [...half, ...left.slice(1)];
+  const left = half.map(([x, y]): Pt => [2 * m + W - x, y]);
+  return [...left.reverse(), ...half.slice(1)];
 }
 
 /** Rombo: contorno cerrado de cuatro vértices. */
