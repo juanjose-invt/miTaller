@@ -88,8 +88,8 @@ export const reja: Generator = {
       values: { ancho: 1000, alto: 1300, hueco: 105, forma: 'arco', flecha: 220, intermedio: true, patSup: 'C', patInf: 'C', patFriso: 'aro', simetria: true, macollas: true, puntas: 'ninguno', anclaje: 'patillas', marco: 'cuad20', barrote: 'cuad12', acabado: 'negro', forja: 'comprada', proceso: 'electrodo' },
     },
     {
-      id: 'corazones', name: 'Reja de corazones y hojas', blurb: 'Barrotes alternos lisos y retorcidos, corazones arriba, friso de rombos, hojas abajo y macollas.',
-      values: { ancho: 1000, alto: 1200, hueco: 110, forma: 'recta', intermedio: true, patSup: 'corazon', patInf: 'hoja', patFriso: 'rombo', simetria: true, macollas: true, puntas: 'ninguno', anclaje: 'orejetas', marco: 'cuad20', barrote: 'cuad12', tipoBarrote: 'alterno', acabado: 'verde', forja: 'comprada', proceso: 'electrodo' },
+      id: 'espirales', name: 'Reja de espirales y hojas', blurb: 'Barrotes alternos lisos y retorcidos, espirales bajo el travesaño, friso de rombos, hojas abajo y macollas.',
+      values: { ancho: 1000, alto: 1200, hueco: 110, forma: 'recta', intermedio: true, patSup: 'espiral', patInf: 'hoja', patFriso: 'rombo', simetria: true, macollas: true, puntas: 'ninguno', anclaje: 'orejetas', marco: 'cuad20', barrote: 'cuad12', tipoBarrote: 'alterno', acabado: 'verde', forja: 'comprada', proceso: 'electrodo' },
     },
   ],
   build,

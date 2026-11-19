@@ -234,7 +234,7 @@ function rebaje(): Project {
   const j = new J('rebaje');
   const s = j.prism('Costado con galce', 'pino', [0, 0, 0], 'y', 240, [[0, 0], [20, 0], [20, 140], [10, 140], [10, 150], [0, 150]]);
   const f = j.box('Trasera', 'haya', [10, 0, 140], [190, 240, 10]);
-  j.move([f], mv([0, 0, 70]));
+  j.move([f], mv([110, 0, 45]));
   j.step('Costado con el galce', 'Escalón a lo largo del canto: un hombro de 10 mm y una lengüeta de 10 mm.', [s]);
   j.step('Trasera', 'La trasera apoya en el hombro y queda enrasada con el canto.', [f]);
   return j.done();

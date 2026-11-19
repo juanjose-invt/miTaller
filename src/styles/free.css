@@ -17,7 +17,7 @@
 .free-toolrow { display: flex; gap: 6px; }
 .free-toolrow .btn.small { min-width: 40px; min-height: 40px; padding: 0 10px; }
 .free-tools .segmented { background: rgb(237 229 213 / 0.94); box-shadow: 0 1px 0 rgb(29 27 24 / 0.08); }
-.free-mode button { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; }
+.free-mode button { display: inline-flex; align-items: center; gap: 6px; min-height: 40px; }
 .free-status { position: absolute; left: 10px; right: 10px; bottom: 10px; display: flex; justify-content: center; pointer-events: none; }
 .free-pill {
   pointer-events: auto; display: inline-flex; gap: 6px; align-items: center; max-width: 100%;
@@ -40,7 +40,7 @@
 /* columna de paneles */
 .free-side { min-width: 0; }
 .free-tabs { margin-bottom: 0; position: sticky; top: var(--header-h); z-index: 5; background: var(--paper); }
-.free-tabs button { flex: 1 0 auto; min-height: 44px; }
+.free-tabs button { flex: 1 1 auto; min-height: 44px; padding: 10px 9px; }
 .free-panel { padding-top: 16px; }
 .free-stack { display: grid; gap: 18px; }
 .free-sec { display: grid; gap: 12px; padding-top: 14px; border-top: 1.5px solid var(--ink); }
@@ -51,8 +51,9 @@
 .help { font-size: 0.85rem; color: var(--ink-3); }
 .free-lead { color: var(--ink-2); font-size: 0.95rem; }
 .free-row { display: flex; gap: 8px; }
-.free-row.wrap { flex-wrap: wrap; align-items: center; }
+.free-btns { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
 .free-row > .btn { flex: 1; }
+.free-fill { display: grid; gap: 8px; padding: 12px; border-radius: var(--r-m); background: var(--paper-2); }
 .free-wide { width: 100%; white-space: normal; text-align: center; min-height: 50px; }
 .free-none { display: grid; gap: 14px; color: var(--ink-2); justify-items: start; }
 
@@ -97,6 +98,7 @@
 .free-joints { display: grid; gap: 6px; }
 .free-joints li { display: flex; gap: 10px; align-items: center; justify-content: space-between; padding: 6px 6px 6px 12px; border: 1px solid var(--line); border-radius: var(--r-m); background: var(--card); min-height: 52px; }
 .free-joints li.todo { border-style: dashed; border-color: #cfa955; }
+.free-jl .free-link { min-height: 40px; display: inline-flex; align-items: center; flex-wrap: wrap; column-gap: 4px; }
 .free-jl { min-width: 0; font-size: 0.92rem; overflow-wrap: anywhere; }
 
 /* listas */
@@ -142,7 +144,7 @@
 .free-saved .btn.small { min-width: 40px; min-height: 40px; padding: 0; }
 
 /* aviso flotante */
-.free-toast { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 60; pointer-events: none; width: max-content; max-width: calc(100vw - 32px); }
+.free-toast { position: fixed; left: 50%; bottom: 72px; transform: translateX(-50%); z-index: 60; pointer-events: none; width: max-content; max-width: calc(100vw - 32px); }
 .free-toast span { display: block; background: var(--ink); color: var(--paper); padding: 10px 16px; border-radius: var(--r-m); box-shadow: var(--shadow); font-weight: 600; font-size: 0.92rem; animation: free-pop 0.25s var(--ease); }
 
 @media (max-width: 1100px) {
@@ -151,19 +153,20 @@
 @media (max-width: 900px) {
   .free-head { padding-block: 14px 10px; }
   .free-title p { display: none; }
-  .free-actions { width: 100%; }
+  .free-actions { width: 100%; flex-wrap: nowrap; }
   .free-actions .btn { flex: 1; }
+  .free-actions .free-save { flex: 0 0 auto; }
   .free { grid-template-columns: minmax(0, 1fr); gap: 0; }
   .free-stage { top: var(--header-h); z-index: 20; background: var(--paper); margin-inline: calc(var(--gutter) * -1); padding: 6px var(--gutter) 8px; }
   .free-stage .viewer { height: 44vh; height: 44dvh; min-height: 260px; max-height: none; }
   .free-tabs { position: static; }
   .free-tabs button { padding: 10px 8px; flex: 1 1 0; font-size: 0.92rem; }
-  .free-toast { bottom: 12px; }
 }
 @media (max-width: 900px) and (max-height: 560px) {
   .free-stage { position: static; }
 }
 @media (max-width: 480px) {
+  .free-hide-xs { display: none; }
   .free-tools .segmented button { padding: 6px 9px; font-size: 0.85rem; }
   .free-mode svg { display: none; }
   .free-posrow { grid-template-columns: 18px 42px 38px minmax(60px, 1fr) 38px 42px; gap: 4px; }

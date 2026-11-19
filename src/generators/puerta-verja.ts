@@ -9,12 +9,14 @@ import {
 /**
  * PUERTA DE VERJA (soldadura, cerrajería).
  * Hoja (o dos hojas) de cancela peatonal: marco de tubo cuadrado, travesaño intermedio y
- * barrotes. Del estilo liso al de forja: remate recto, en arco o con barrotes pasantes en
- * lanza; zócalo de chapa, friso de aros o volutas, volutas en C o en S entre barrotes,
+ * barrotes lisos o retorcidos. Del estilo liso al de forja: remate recto, en arco o con barrotes
+ * pasantes en lanza; zócalo de chapa; patrones de motivos (volutas en C y en S, espirales, aros,
+ * rombos, corazones, hojas) en el paño de arriba, en el de abajo y en un friso, con simetría;
  * puntas, bolas, pernios, cierre, batiente y postes con placa de anclaje.
  *
- * Este archivo exporta además las ayudas de forja decorativa que usan `valla` y `reja`:
- * reparto de barrotes, volutas ajustadas al hueco real, aros, puntas, bolas, textos y pasos.
+ * Este archivo exporta además el motor de forja decorativa que usan `valla` y `reja`: reparto de
+ * barrotes, patrones repetibles, motivos ajustados al hueco real con las curvas del visor
+ * (`core/curves.ts`), frisos, puntas, bolas, textos y pasos.
  */
 
 // =====================================================================================
@@ -91,8 +93,8 @@ export const paramAcabado = (def = 'negro'): ParamDef => ({
   ],
 });
 export const PARAM_FORJA: ParamDef = {
-  key: 'forja', label: 'Volutas, aros y arco', type: 'select', default: 'comprada', group: 'Uniones',
-  help: 'Las volutas, aros y puntas se venden hechos como elementos de forja. Curvarlos tú es más barato y personal, pero mucho más laborioso. Las puntas y bolas se compran siempre.',
+  key: 'forja', label: 'Motivos de forja y arco', type: 'select', default: 'comprada', group: 'Uniones',
+  help: 'Las volutas, espirales, aros, rombos y corazones se venden hechos como elementos de forja. Curvarlos tú es más barato y personal, pero mucho más laborioso. Las puntas, bolas, hojas y barrotes retorcidos se compran siempre.',
   options: [
     { value: 'comprada', label: 'Elementos comprados', hint: 'Lo realista para empezar' },
     { value: 'curvada', label: 'Curvados por ti', hint: 'En frío, con plantilla: avanzado' },
@@ -347,7 +349,7 @@ export function curvaEn(
   const dev = polyLength(e.pts);
   const curvada = f.modo === 'curvada';
   const base = NOMBRE_PIEZA[o.c];
-  const r = f.L(`${o.c}|${fx(ew)}|${fx(eh)}|${f.modo}`, o.name ? `${base} ${o.name}` : base);
+  const r = f.L(`${o.c}|${fx(ew)}|${fx(eh)}|${f.modo}|${curvada ? Math.round(dev + 20) : ''}`, o.name ? `${base} ${o.name}` : base);
   const medida = `${Math.round(eh)} × ${Math.round(ew)} mm`;
   const stock = curvada ? 'Pletina de acero 12×6 mm' : `${base} de forja de ${medida}, barra de ${VB} mm`;
   const id = o.c === 'rombo'
@@ -362,6 +364,7 @@ export function curvaEn(
     p.note = `${base} curvado en frío sobre plantilla: ${medida} terminado (desarrollo unos ${Math.round(dev)} mm, más 20 mm para recortar${o.c === 'rombo' ? '; se dobla en cuatro esquinas y se cierra con un punto' : ''}).`;
   } else {
     p.stockKind = 'unidad';
+    p.cut = [r1(Math.max(ew, eh)), r1(Math.min(ew, eh)), VB];
     p.note = `Medida exterior terminada: ${Math.round(eh)} mm de alto × ${Math.round(ew)} mm de ancho.`;
   }
   const bs = bordes(e);
@@ -669,6 +672,9 @@ function secuenciaFriso(patron: Motivo[], n: number, simetria: boolean) {
 export function planFriso(span: number, objetivo: number, patron: Motivo[], simetria: boolean): PlanFriso | null {
   if (!patronActivo(patron)) return null;
   const avisos: string[] = [];
+  // las volutas lucen más en un friso algo más alto que los aros o los rombos
+  const motivos = patron.filter((m) => m !== 'vacio');
+  objetivo *= motivos.reduce((s, m) => s + (m === 'C' ? 1.3 : m === 'S' ? 1.15 : 1), 0) / motivos.length;
   const ratios = new Map<Motivo, number>();
   const ratio = (m: Motivo) => { if (!ratios.has(m)) ratios.set(m, anchoFriso(m, objetivo) / objetivo); return ratios.get(m)!; };
   let best: { n: number; h: number } | null = null;
@@ -787,9 +793,9 @@ export function tecDecoracion(modo: ModoForja): Technique {
   if (modo === 'comprada') {
     return {
       name: 'Elementos de forja comprados, presentados y soldados',
-      why: 'Las volutas, aros y puntas se venden ya hechos como elementos de forja. Comprarlos te da piezas regulares e iguales entre sí sin fragua ni plantillas: solo tienes que elegir la medida que encaje en tu hueco y soldarlos. Es la forma realista de hacer tu primera verja decorada.',
+      why: 'Las volutas, espirales, aros, rombos, corazones, hojas y puntas se venden ya hechos como elementos de forja. Comprarlos te da piezas regulares e iguales entre sí sin fragua ni plantillas: solo tienes que elegir la medida que encaje en tu hueco y soldarlos. Es la forma realista de hacer tu primera verja decorada.',
       how: [
-        'Compra por la medida exterior que da la lista de piezas: el ancho de cada voluta es el hueco libre real entre barrotes, para que apoye justa en los dos.',
+        'Compra por la medida exterior que da la lista de piezas: el ancho de cada motivo es el hueco libre real entre barrotes, para que apoye justo en los dos.',
         'Si alguna llega un poco más ancha, rebaja la punta del ojo con el disco de láminas; si llega estrecha, no la fuerces abriéndola: pide la medida siguiente.',
         'Presenta cada pieza en su hueco con una pinza de presión o un sargento pequeño y comprueba con la escuadra que queda vertical y a la altura de sus compañeras.',
         'Puntea cada contacto con un toque corto, apuntando el arco más al barrote o al tubo que a la voluta: la barra de forja es fina y se funde antes.',
@@ -798,7 +804,7 @@ export function tecDecoracion(modo: ModoForja): Technique {
     };
   }
   return {
-    name: 'Volutas y aros curvados en frío sobre plantilla',
+    name: 'Motivos curvados en frío sobre plantilla',
     why: 'Curvar tú las volutas sale más barato y te deja ajustar cada pieza al hueco exacto, pero es trabajo de paciencia: todas deben salir iguales. La clave es una plantilla (o una horquilla de curvar) que repita siempre la misma curva.',
     how: [
       'Dibuja cada voluta a tamaño real (1:1) sobre un tablero o una chapa con la medida exterior de la lista de piezas; mide su desarrollo con un cordel siguiendo el dibujo y corta la pletina algo más larga.',

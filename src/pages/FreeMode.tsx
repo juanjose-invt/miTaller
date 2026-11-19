@@ -275,7 +275,7 @@ export function FreeMode() {
           <p className="muted">Coloca piezas a mano y la web saca la lista de corte, la compra y el paso a paso. {design.parts.length ? `${design.parts.length} ${design.parts.length === 1 ? 'pieza' : 'piezas'} · ${dimsText} · ${CRAFT_LABEL[craft]}` : 'Empieza añadiendo una pieza o abre un ejemplo.'}</p>
         </div>
         <div className="free-actions">
-          <button type="button" className="btn" onClick={doSave} disabled={!design.parts.length}><Save size={18} aria-hidden />Guardar</button>
+          <button type="button" className="btn free-save" onClick={doSave} disabled={!design.parts.length} aria-label="Guardar en Mis diseños"><Save size={18} aria-hidden /><span className="free-hide-xs">Guardar</span></button>
           <button type="button" className="btn primary" onClick={openManual} disabled={!full}>Ver paso a paso y PDF <ArrowRight size={18} aria-hidden /></button>
         </div>
       </div>
@@ -365,7 +365,7 @@ export function FreeMode() {
                 <button type="button" className="btn small" onClick={() => setTab('anadir')}><Plus size={16} aria-hidden />Añadir pieza</button>
               </div>
             ))}
-            {tab === 'uniones' && <JointsPanel contacts={contacts} byId={byId} joints={design.joints ?? {}} refName={refName} setJoint={setJoint} commit={commit} select={(id) => { setSelected(id); }} selected={selected} />}
+            {tab === 'uniones' && <JointsPanel craft={craft} contacts={contacts} byId={byId} joints={design.joints ?? {}} refName={refName} setJoint={setJoint} commit={commit} select={(id) => { setSelected(id); }} selected={selected} />}
             {tab === 'lista' && <ListPanel design={design} project={full} refs={refs} overlaps={overlaps} contacts={contacts.length} dimsText={dimsText} selected={selected} select={(id) => { setSelected(id); setTab('pieza'); }} refName={refName} />}
             {tab === 'diseno' && (
               <DesignPanel
@@ -670,8 +670,8 @@ function JointRow({ c, label, byId, value, setJoint, onFocus }: { c: Contact; la
 
 // ---------- panel: uniones ----------
 
-function JointsPanel({ contacts, byId, joints, refName, setJoint, commit, select, selected }: {
-  contacts: Contact[]; byId: Map<string, FreePart>; joints: Record<string, JointKind>; refName: (id: string) => string;
+function JointsPanel({ contacts, byId, joints, refName, setJoint, commit, select, selected, craft }: {
+  craft: Craft; contacts: Contact[]; byId: Map<string, FreePart>; joints: Record<string, JointKind>; refName: (id: string) => string;
   setJoint: (key: string, j: JointKind | '') => void; commit: (fn: (d: FreeDesign) => FreeDesign) => void; select: (id: string) => void; selected: string | null;
 }) {
   const pending = contacts.filter((c) => !joints[c.key]).length;
@@ -692,13 +692,17 @@ function JointsPanel({ contacts, byId, joints, refName, setJoint, commit, select
   }
   return (
     <div className="free-stack">
-      <p className="free-lead">El modo libre no elige las uniones por ti: decide cómo unir cada encuentro; mira <Link to="/consejos/carpinteria">Consejos</Link>. Lo que elijas aparece marcado en el modelo y en el manual, sin medidas inventadas.</p>
-      <div className="free-row wrap">
-        <span className="help">{pending ? `${pending} por decidir.` : 'Todos decididos.'} Rellenar los pendientes con:</span>
-        {(['tornillo', 'tubillon', 'cola', 'soldadura'] as JointKind[]).map((j) => (
-          <button key={j} type="button" className="btn small" disabled={!pending} onClick={() => fillAll(j)}>{JOINT_LABEL[j]}</button>
-        ))}
-      </div>
+      <p className="free-lead">El modo libre no elige las uniones por ti: decide cómo unir cada encuentro; mira <Link to={`/consejos/${craft}`}>Consejos</Link>. Lo que elijas aparece marcado en el modelo y en el manual, sin medidas inventadas.</p>
+      {pending > 0 ? (
+        <div className="free-fill">
+          <span className="help">{pending === 1 ? 'Queda 1 encuentro por decidir.' : `Quedan ${pending} encuentros por decidir.`} Rellena los pendientes con:</span>
+          <div className="presets">
+            {(['tornillo', 'tubillon', 'cola', 'soldadura'] as JointKind[]).map((j) => (
+              <button key={j} type="button" className="btn small" onClick={() => fillAll(j)}>{JOINT_LABEL[j]}</button>
+            ))}
+          </div>
+        </div>
+      ) : <p className="help">Todos los encuentros tienen unión elegida.</p>}
       <ul className="free-joints">
         {contacts.map((c) => (
           <JointRow key={c.key} c={c} byId={byId} value={joints[c.key]} setJoint={setJoint} onFocus={() => select(c.a)}
@@ -800,7 +804,7 @@ function DesignPanel(p: {
             {([5, 10] as const).map((g) => <button key={g} type="button" aria-pressed={p.grid === g} onClick={() => p.setGrid(g)}>{g} mm</button>)}
           </div>
         </div>
-        <div className="free-row wrap">
+        <div className="free-btns">
           <button type="button" className="btn" onClick={p.doSave} disabled={!p.design.parts.length}><Save size={18} aria-hidden />{p.savedId ? 'Guardar cambios' : 'Guardar en Mis diseños'}</button>
           <button type="button" className="btn" onClick={p.copyLink} disabled={!p.design.parts.length}><LinkIcon size={18} aria-hidden />Copiar enlace</button>
         </div>
