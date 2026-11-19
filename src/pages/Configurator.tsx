@@ -62,6 +62,7 @@ function Field({ p, value, set }: { p: ParamDef; value: ParamValues[string]; set
       </div>
     );
   }
+  if (p.type !== 'select') return null;
   return (
     <div className="field" role="radiogroup" aria-labelledby={`${id}-l`}>
       <span className="lab" id={`${id}-l`}>{p.label}</span>

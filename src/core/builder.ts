@@ -1,5 +1,6 @@
 import type { Axis, HardwareLine, Mark, MaterialId, Part, Project, Step, Vec3 } from './types';
 import { MATERIALS } from './materials';
+import { corazonPoints, hojaPolygon, polyLength, romboPoints } from './curves';
 
 const AX: Record<Axis, 0 | 1 | 2> = { x: 0, y: 1, z: 2 };
 const fmt = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1).replace('.', ','));
@@ -271,6 +272,79 @@ export class Builder {
         stock: o.stock ?? `Pletina de acero ${fmt(s1)}×${fmt(s2)} mm`,
         stockKind: 'lineal', cut: [Math.round(longitudArco(o.width, o.rise)), s1, s2], deco: { bar: a },
         note: o.note ?? 'Se curva en frío sobre una plantilla',
+      },
+      o.id,
+    );
+  }
+
+  /** Rombo de barra (contorno), plano, perpendicular a `normal`. `face` = [ancho, alto]. */
+  rombo(o: Common & { face: [number, number]; normal: Axis; bar: number; stock?: string }): string {
+    const [u, v] = o.face, t = o.bar;
+    const size: Vec3 = o.normal === 'y' ? [u, t, v] : o.normal === 'x' ? [t, u, v] : [u, v, t];
+    return this.push(
+      {
+        ref: o.ref, name: o.name, shape: 'rombo', size, axis: 'y', pos: center(o.at, size), material: 'acero',
+        stock: o.stock ?? `Rombo de forja ${fmt(u)} × ${fmt(v)} mm, barra de ${fmt(t)} mm`,
+        stockKind: 'unidad', cut: [Math.round(polyLength(romboPoints(u, v, t))), t, t], deco: { bar: t }, note: o.note,
+      },
+      o.id,
+    );
+  }
+
+  /** Corazón de forja (dos volutas unidas en punta), plano, perpendicular a `normal`. */
+  corazon(o: Common & { face: [number, number]; normal: Axis; bar: number; stock?: string }): string {
+    const [u, v] = o.face, t = o.bar;
+    const size: Vec3 = o.normal === 'y' ? [u, t, v] : o.normal === 'x' ? [t, u, v] : [u, v, t];
+    return this.push(
+      {
+        ref: o.ref, name: o.name, shape: 'corazon', size, axis: 'y', pos: center(o.at, size), material: 'acero',
+        stock: o.stock ?? `Corazón de forja ${fmt(u)} × ${fmt(v)} mm, barra de ${fmt(t)} mm`,
+        stockKind: 'unidad', cut: [Math.round(polyLength(corazonPoints(u, v, t))), t, t], deco: { bar: t }, note: o.note,
+      },
+      o.id,
+    );
+  }
+
+  /** Barrote de cuadradillo retorcido (entorchado): se dibuja con la torsión. `side` = lado del cuadradillo. */
+  retorcido(o: Common & { side: number; length: number; axis?: Axis; stock?: string }): string {
+    const axis = o.axis ?? 'y';
+    const size = this.linealSize([o.side, o.side], o.length, axis);
+    return this.push(
+      {
+        ref: o.ref, name: o.name, shape: 'retorcido', size, axis, pos: center(o.at, size), material: 'acero',
+        stock: o.stock ?? `Cuadradillo retorcido de forja ${fmt(o.side)} mm`,
+        stockKind: 'lineal', cut: [o.length, o.side, o.side], note: o.note,
+      },
+      o.id,
+    );
+  }
+
+  /** Hoja de forja (chapa recortada en forma de hoja), plana, con la punta hacia +v. */
+  hoja(o: Common & { face: [number, number]; normal: Axis; thickness?: number; stock?: string }): string {
+    const [u, v] = o.face, t = o.thickness ?? 3;
+    return this.prisma({
+      ref: o.ref, name: o.name, at: o.at, id: o.id, note: o.note, material: 'acero', normal: o.normal, thickness: t,
+      poly: hojaPolygon(u, v), stock: o.stock ?? `Hoja de forja ${fmt(v)} × ${fmt(u)} mm`, stockKind: 'unidad',
+    });
+  }
+
+  /**
+   * Pieza de contorno poligonal extruida (colas de milano, espigas en cuña, cartelas, hojas…).
+   * `poly` son los vértices en el plano perpendicular a `normal`, en mm desde la esquina mínima `at`
+   * (normal 'z' → (x, y); normal 'x' → (z, y); normal 'y' → (x, z)); `thickness` es el grueso extruido.
+   */
+  prisma(o: Common & { poly: [number, number][]; normal: Axis; thickness: number; material?: MaterialId; stock?: string; stockKind?: Part['stockKind']; grain?: Axis }): string {
+    const material = o.material ?? 'pino';
+    const us = o.poly.map((q) => q[0]), vs = o.poly.map((q) => q[1]);
+    const u = Math.max(...us), v = Math.max(...vs), t = o.thickness;
+    const size: Vec3 = o.normal === 'z' ? [u, v, t] : o.normal === 'x' ? [t, v, u] : [u, t, v];
+    const axis = o.grain ?? (o.normal === 'z' ? (u >= v ? 'x' : 'y') : o.normal === 'x' ? (u >= v ? 'z' : 'y') : u >= v ? 'x' : 'z');
+    const cut = [u, v, t].sort((a, b) => b - a) as Vec3;
+    return this.push(
+      {
+        ref: o.ref, name: o.name, shape: 'prisma', size, axis, pos: center(o.at, size), material,
+        stock: o.stock ?? (MATERIALS[material].kind === 'metal' ? `Chapa de acero ${fmt(t)} mm` : `Madera de ${MATERIALS[material].label.toLowerCase()} ${fmt(t)} mm`),
+        stockKind: o.stockKind ?? 'tablero', cut, poly: o.poly, polyNormal: o.normal, note: o.note,
       },
       o.id,
     );

@@ -30,7 +30,14 @@ export interface Part {
    * 'cone' punta de lanza o pincho · 'voluta' espiral en C, en S o simple · 'aro' anillo ·
    * 'arco' barra curvada en arco · 'bola' esfera o macolla.
    */
-  shape: 'box' | 'cyl' | 'cone' | 'voluta' | 'aro' | 'arco' | 'bola';
+  shape: 'box' | 'cyl' | 'cone' | 'voluta' | 'aro' | 'arco' | 'bola' | 'prisma' | 'rombo' | 'corazon' | 'retorcido';
+  /**
+   * Solo para 'prisma': contorno del polígono en mm, en el plano perpendicular a `polyNormal`,
+   * medido desde la esquina mínima de la pieza. Ejes del plano: normal 'z' → (x, y); normal 'x' → (z, y);
+   * normal 'y' → (x, z). El prisma se extruye todo el grueso de la pieza en la dirección de la normal.
+   */
+  poly?: [number, number][];
+  polyNormal?: Axis;
   /** Caja envolvente final en mm [x, y, z]. Para 'cyl' el diámetro ocupa los dos ejes no longitudinales. */
   size: Vec3;
   /** Eje longitudinal (dirección del largo / de la veta). */
@@ -86,6 +93,8 @@ export interface Technique {
   why: string;
   /** Cómo se ejecuta, en frases cortas. */
   how: string[];
+  /** id de un ensamble de `src/data/ensambles-3d.ts` para enseñarlo en 3D junto a la técnica. */
+  joint?: string;
 }
 
 export interface Step {
@@ -133,6 +142,8 @@ export interface Project {
   /** Notas de diseño: por qué estas medidas, límites de uso… */
   notes?: string[];
   sources?: SourceRef[];
+  /** Tinte o pintura (hex) con el que se dibuja toda la madera. Sin valor, madera natural. */
+  stain?: string;
   /** Color de pintura (hex) con el que se dibuja todo el acero: «#26282b» para negro forja. Sin valor, acero visto. */
   paint?: string;
   /** Resumen legible de las opciones elegidas. */
@@ -170,7 +181,27 @@ export interface BoolParam extends ParamBase {
   type: 'boolean';
   default: boolean;
 }
-export type ParamDef = NumberParam | SelectParam | BoolParam;
+/**
+ * Patrón repetible: una secuencia de motivos elegidos de `options` (p. ej. forja: «C, aro, S»).
+ * El valor es una cadena con los códigos separados por comas; el generador la repite cíclicamente.
+ */
+export interface PatternParam extends ParamBase {
+  type: 'pattern';
+  options: { value: string; label: string; hint?: string }[];
+  /** Nº máximo de motivos de la secuencia. */
+  max: number;
+  default: string;
+}
+/**
+ * Parámetro con editor propio (p. ej. la distribución de un mueble modular). El valor es una cadena
+ * que el generador sabe leer; `editor` es el id de un componente registrado en `src/components/editors.tsx`.
+ */
+export interface CustomParam extends ParamBase {
+  type: 'custom';
+  editor: string;
+  default: string;
+}
+export type ParamDef = NumberParam | SelectParam | BoolParam | PatternParam | CustomParam;
 
 export interface Preset {
   id: string;
@@ -189,5 +220,10 @@ export interface Generator {
   difficulty: 1 | 2 | 3;
   params: ParamDef[];
   presets: Preset[];
+  /**
+   * Parámetros numéricos que se pueden estirar arrastrando los tiradores del modelo, por eje.
+   * Si falta, se deducen por el nombre de la clave (ancho/largo → x, alto → y, fondo → z).
+   */
+  dragAxes?: Partial<Record<Axis, string>>;
   build: (values: ParamValues) => Project;
 }
