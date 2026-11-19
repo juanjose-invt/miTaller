@@ -84,7 +84,7 @@ export function cost(project: Project, prices: Record<string, number>): CostSumm
 export function warnings(project: Project): string[] {
   const out: string[] = [];
   const [w, h, d] = project.dims;
-  if (h > 1000 && h / Math.min(w, d) > 3) out.push('Es alto y estrecho: fíjalo a la pared para que no pueda volcar.');
+  if (project.craft === 'carpinteria' && h > 1000 && h / Math.min(w, d) > 3) out.push('Es alto y estrecho: fíjalo a la pared para que no pueda volcar.');
   // baldas largas: mayor tramo sin apoyo por debajo, medido sobre las piezas reales
   const shelves = project.parts.filter((p) => MATERIALS[p.material].kind === 'madera' && p.stockKind === 'tablero' && p.shape === 'box' && !p.rot && p.size[1] <= 18 && p.size[1] === Math.min(...p.size));
   for (const sh of shelves) {
